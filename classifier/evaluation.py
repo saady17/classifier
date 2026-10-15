@@ -57,7 +57,9 @@ TEST_SHARE = 1 / 3
 
 def _ratings_db() -> sqlite3.Connection:
     os.makedirs(PRIVATE, exist_ok=True)
-    db = sqlite3.connect(RATINGS)
+    # The rating page and the AI judges write at the same time: wait for the lock instead of failing.
+    db = sqlite3.connect(RATINGS, timeout=30)
+    db.execute("PRAGMA journal_mode=WAL")
     db.execute(
         "CREATE TABLE IF NOT EXISTS ratings (resume_id TEXT, job_id TEXT, rater TEXT, rating INTEGER, at TEXT, "
         "PRIMARY KEY (resume_id, job_id, rater))"
