@@ -36,11 +36,12 @@ _YEARS = re.compile(
     re.I,
 )
 _DEGREES = [
-    (5, r"\b(ph\.?d|doctorate|doctoral)\b"),
-    (4, r"\b(master'?s|m\.?s\.?c?\b|m\.?a\.?\b|mba|m\.eng)\b"),
-    (3, r"\b(bachelor'?s|b\.?s\.?c?\b|b\.?a\.?\b|b\.?eng|undergraduate degree|4[- ]year degree|college degree|university degree)\b"),
-    (2, r"\b(associate'?s degree|associate degree|2[- ]year degree)\b"),
-    (1, r"\b(high school|ged|secondary school)\b"),
+    (5, r"\b(ph\.?\s?d|doctorate|doctoral|doctor of|d\.?n\.?p|pharm\.?d|m\.?d\.?|j\.?d\.?|psy\.?d|ed\.?d)\b"),
+    (4, r"\b(masters?|master'?s|master of|m\.?s\.?c?|m\.?a\.?|mba|m\.?eng|msn|mph|msw|m\.?ed|llm)\b"),
+    (3, r"\b(bachelors?|bachelor'?s|bachelor of|b\.?s\.?c?|b\.?a\.?|b\.?eng|bsn|b\.?comm?|bba|b\.?tech|b\.?e\.?|"
+        r"undergraduate degree|4[- ]year degree|college degree|university degree)\b"),
+    (2, r"\b(associate'?s degree|associate degree|associate of|a\.?a\.?s?|adn|2[- ]year degree|diploma in|hnd)\b"),
+    (1, r"\b(high school|ged|secondary school|a[- ]levels?)\b"),
 ]
 _EQUIV = re.compile(r"or equivalent|or related experience|equivalent (practical |work )?experience|in lieu of", re.I)
 _NO_SPONSOR = re.compile(
@@ -76,6 +77,8 @@ class JobProfile:
 
 
 def _heading_kind(line: str) -> str | None:
+    if line.lstrip().startswith(("-", "•", "*", "·", "–")):
+        return None  # a bullet is content, even when short ("- MBA preferred")
     text = line.strip().strip("#*:–-—").strip()
     if not text or len(text) > 70 or text.startswith("- "):
         return None
@@ -112,11 +115,10 @@ def _years(lines: list[str]) -> float | None:
 
 
 def _degree(text: str) -> int:
+    """Minimum degree a job asks for: "BS or MS" means a bachelor's is enough."""
     low = text.lower()
-    for level, pattern in _DEGREES:
-        if re.search(pattern, low):
-            return level
-    return 0
+    found = [level for level, pattern in _DEGREES if re.search(pattern, low)]
+    return min(found) if found else 0
 
 
 def parse_job(description: str, company: str = "") -> JobProfile:
@@ -125,7 +127,8 @@ def parse_job(description: str, company: str = "") -> JobProfile:
     lines = sections(description)
     profile = JobProfile(structured=any(kind in (REQ, PREF) for kind, _ in lines))
     req_lines, pref_lines = [], []
-    for kind, line in lines:
+    clauses = [(kind, c) for kind, line in lines for c in re.split(r";\s+|(?<=[a-z0-9)])\.\s+(?=[A-Z])", line)]
+    for kind, line in clauses:
         if kind == SKIP or not line.strip() or _LINE_SKIP.search(line):
             continue
         found = m.find(line)

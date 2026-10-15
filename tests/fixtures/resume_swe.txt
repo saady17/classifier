@@ -1,0 +1,24 @@
+Jordan Lee
+Seattle, WA | jordan.lee@example.com | (206) 555-0142
+
+SUMMARY
+Backend engineer with 7 years building payment and data platforms.
+
+EXPERIENCE
+Senior Software Engineer — Acme Payments, Seattle, WA
+Mar 2021 – Present
+- Built Go and Python microservices on AWS (EKS, S3) handling 40k req/s
+- Led migration from MySQL to PostgreSQL; set up Terraform and CI/CD with GitHub Actions
+
+Software Engineer | DataCo | 06/2018 - 02/2021
+- Kafka streaming pipelines, Airflow, Snowflake
+- Mentored 3 junior engineers
+
+Software Engineering Intern, Big Tech Inc. Summer 2017
+- React dashboards
+
+EDUCATION
+B.S. Computer Science, University of Washington, 2018
+
+SKILLS
+Go, Python, Java, PostgreSQL, Redis, Kubernetes, Docker, Terraform, AWS, gRPC, REST

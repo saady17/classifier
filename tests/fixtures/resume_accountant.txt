@@ -1,0 +1,12 @@
+PRIYA SHAH
+Toronto, ON | priya.shah@example.com
+
+EXPERIENCE
+Staff Accountant, Northwind Ltd. (2020 - 2023)
+Month-end close, account reconciliations, accounts payable, NetSuite, advanced Excel (pivot tables, VLOOKUP)
+Senior Accountant, Contoso Inc. (Jan 2023 - Present)
+IFRS reporting, audit support, FP&A forecasting, Power BI dashboards
+
+EDUCATION
+Bachelor of Commerce, Accounting — University of Toronto
+CPA (in progress)
