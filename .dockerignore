@@ -1,0 +1,5 @@
+.git
+data/*.db
+data/raw
+eval/resumes
+eval/private

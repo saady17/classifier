@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+/data/*.db
+/data/*.db-*
+/data/raw/
+/data/taxonomy/raw/
+/eval/resumes/
+/eval/private/
+.env
