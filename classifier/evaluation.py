@@ -147,13 +147,30 @@ def precision_at(ranked: list[str], rel: dict[str, float], k: int = 10, good: fl
 
 
 def averaged_ratings(raters: str | None = None) -> dict[str, dict[str, float]]:
-    """Mean rating per (resume, job). raters: "all" (default), "ai" or "human" (env EVAL_RATERS)."""
+    """The label for each (resume, job). raters (env EVAL_RATERS):
+    "human": mean of human ratings; "ai": the cross-checked AI verdict (ai:final), else the mean of
+    the AI judges; "all" (default): human ratings where they exist, otherwise the AI label."""
     raters = raters or os.environ.get("EVAL_RATERS", "all")
-    where = {"ai": " AND rater LIKE 'ai:%'", "human": " AND rater NOT LIKE 'ai:%'"}.get(raters, "")
-    out: dict[str, dict[str, list[int]]] = {}
-    for rid, jid, r in _ratings_db().execute("SELECT resume_id, job_id, rating FROM ratings WHERE rating >= 0" + where):
-        out.setdefault(rid, {}).setdefault(jid, []).append(r)
-    return {rid: {j: sum(v) / len(v) for j, v in jobs.items()} for rid, jobs in out.items()}
+    human: dict[tuple[str, str], list[int]] = {}
+    final: dict[tuple[str, str], int] = {}
+    judges: dict[tuple[str, str], list[int]] = {}
+    for rid, jid, who, r in _ratings_db().execute("SELECT resume_id, job_id, rater, rating FROM ratings WHERE rating >= 0"):
+        if who == "ai:final":
+            final[(rid, jid)] = r
+        elif who.startswith("ai:"):
+            judges.setdefault((rid, jid), []).append(r)
+        else:
+            human.setdefault((rid, jid), []).append(r)
+    labels: dict[tuple[str, str], float] = {}
+    if raters in ("ai", "all"):
+        labels.update({k: sum(v) / len(v) for k, v in judges.items()})
+        labels.update({k: float(v) for k, v in final.items()})
+    if raters in ("human", "all"):
+        labels.update({k: sum(v) / len(v) for k, v in human.items()})
+    out: dict[str, dict[str, float]] = {}
+    for (rid, jid), value in labels.items():
+        out.setdefault(rid, {})[jid] = value
+    return out
 
 
 def report() -> None:

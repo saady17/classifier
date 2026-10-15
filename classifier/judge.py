@@ -5,6 +5,7 @@ resume-job pair 0-3 with the same rubric human raters use.
     python -m classifier.judge                 # rate every unrated pair in eval/private/pools.json
     python -m classifier.judge --only=gemini   # one judge
     python -m classifier.judge agreement       # how the judges agree with each other and with humans
+    python -m classifier.judge crosscheck      # DeepSeek reviews both reasonings where the judges disagree
 
 Personal details are removed from resumes before anything is sent (redact())."""
 
@@ -36,7 +37,17 @@ Rate each job for THIS candidate on this scale:
 0 = not a fit: a different field, far above or below their level, or a required license/degree they lack.
 Judge only the candidate's background against each job's requirements. Ignore company prestige,
 salary and location (location is handled separately). Be strict and consistent.
-Reply with JSON only: {"ratings": [{"job": <number>, "rating": <0-3>, "reason": "<max 15 words>"}]}"""
+Reply with JSON only: {"ratings": [{"job": <number>, "rating": <0-3>, "reason": "<max 30 words, cite concrete evidence>"}]}"""
+
+CROSSCHECK = """You are a senior recruiter reviewing two colleagues who rated the same jobs for one candidate
+and disagreed. Use the same scale:
+3 great fit, 2 good fit (one gap), 1 weak fit (stretch or neighbouring field), 0 not a fit (different field,
+wrong level, or a required license/degree missing).
+For each job, re-read the resume and the job yourself, weigh both colleagues' reasoning, decide who is right
+(or neither), and give the final rating. Cite concrete evidence: skills, years, level, licenses, degree.
+Ignore company prestige, salary and location.
+Reply with JSON only: {"ratings": [{"job": <number>, "final_rating": <0-3>, "sided_with": "A"|"B"|"neither",
+"reasoning": "<max 40 words>"}]}"""
 
 _EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
 _PHONE = re.compile(r"(\+?\d[\d\s().-]{7,}\d)")
@@ -139,6 +150,71 @@ async def rate_all(only: set[str] | None = None) -> None:
     print("done")
 
 
+async def crosscheck() -> None:
+    """Where Gemini and DeepSeek disagree, DeepSeek reviews both reasonings and decides (rater ai:final).
+    Where they agree, that rating is final."""
+    pools = _load_pools()
+    db = _ratings_db()
+    db.execute("CREATE TABLE IF NOT EXISTS ai_reasons (resume_id TEXT, job_id TEXT, rater TEXT, reason TEXT, PRIMARY KEY (resume_id, job_id, rater))")
+    rows = db.execute(
+        """SELECT g.resume_id, g.job_id, g.rating, d.rating, coalesce(gr.reason, ''), coalesce(dr.reason, '')
+           FROM ratings g JOIN ratings d ON d.resume_id = g.resume_id AND d.job_id = g.job_id AND d.rater = 'ai:deepseek'
+           LEFT JOIN ai_reasons gr ON gr.resume_id = g.resume_id AND gr.job_id = g.job_id AND gr.rater = 'ai:gemini'
+           LEFT JOIN ai_reasons dr ON dr.resume_id = g.resume_id AND dr.job_id = g.job_id AND dr.rater = 'ai:deepseek'
+           WHERE g.rater = 'ai:gemini' AND NOT EXISTS (
+             SELECT 1 FROM ratings f WHERE f.resume_id = g.resume_id AND f.job_id = g.job_id AND f.rater = 'ai:final')"""
+    ).fetchall()
+    stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    disputes: dict[str, list] = {}
+    for rid, jid, g, d, gr, dr in rows:
+        if g == d:
+            db.execute("INSERT OR REPLACE INTO ratings VALUES (?,?,?,?,?)", (rid, jid, "ai:final", g, stamp))
+            db.execute("INSERT OR REPLACE INTO ai_reasons VALUES (?,?,?,?)", (rid, jid, "ai:final", "Both judges agreed."))
+        elif rid in pools:
+            disputes.setdefault(rid, []).append((jid, g, gr, d, dr))
+    db.commit()
+    tasks = [(rid, items[i : i + BATCH]) for rid, items in disputes.items() for i in range(0, len(items), BATCH)]
+    print(f"{len(rows) - sum(len(v) for v in disputes.values())} agreed; {sum(len(v) for v in disputes.values())} disputed pairs in {len(tasks)} requests")
+    gate = asyncio.Semaphore(4)
+    model = JUDGES["deepseek"]["model"]
+    async with httpx.AsyncClient(timeout=180) as client:
+
+        async def one(rid, items):
+            pool = pools[rid]
+            parts = [f"CANDIDATE RESUME:\n{redact(pool['text'])[:9000]}\n"]
+            for n, (jid, g, gr, d, dr) in enumerate(items, 1):
+                job = pool["jobs"][jid]
+                parts.append(f"JOB {n}: {job['title']} at {job['company']}\n{job['description'][:JOB_CHARS]}\n"
+                             f"Colleague A rated {g}: {gr}\nColleague B rated {d}: {dr}\n")
+            for attempt in range(3):
+                try:
+                    async with gate:
+                        r = await client.post(
+                            "https://openrouter.ai/api/v1/chat/completions",
+                            headers={"Authorization": f"Bearer {os.environ['OPENROUTER_API_KEY']}", "X-Title": "Jobzhub classifier evaluation"},
+                            json={"model": model, "temperature": 0, "response_format": {"type": "json_object"}, "provider": {"data_collection": "deny"},
+                                  "messages": [{"role": "system", "content": CROSSCHECK}, {"role": "user", "content": "\n".join(parts)}]},
+                        )
+                    r.raise_for_status()
+                    got = {int(x["job"]): x for x in json.loads(r.json()["choices"][0]["message"]["content"])["ratings"]}
+                    if set(got) != set(range(1, len(items) + 1)) or any(not 0 <= int(x["final_rating"]) <= 3 for x in got.values()):
+                        raise ValueError("incomplete or out-of-range ratings")
+                    for n, (jid, *_rest) in enumerate(items, 1):
+                        x = got[n]
+                        db.execute("INSERT OR REPLACE INTO ratings VALUES (?,?,?,?,?)", (rid, jid, "ai:final", int(x["final_rating"]), stamp))
+                        side = {"A": "Sided with Gemini", "B": "Sided with DeepSeek"}.get(str(x.get("sided_with")), "Sided with neither")
+                        db.execute("INSERT OR REPLACE INTO ai_reasons VALUES (?,?,?,?)", (rid, jid, "ai:final", f"{side}. {str(x.get('reasoning', ''))[:400]}"))
+                    db.commit()
+                    return
+                except Exception as exc:  # retried, then reported
+                    err = exc
+                    await asyncio.sleep(3 * (attempt + 1))
+            print(f"  cross-check {pool['file']}: failed ({type(err).__name__}: {str(err)[:120]})")
+
+        await asyncio.gather(*(one(*t) for t in tasks))
+    print("cross-check done")
+
+
 def agreement() -> None:
     db = _ratings_db()
     by: dict[tuple[str, str], dict[str, int]] = {}
@@ -156,6 +232,8 @@ def agreement() -> None:
         print(f"{a_name:>14} vs {b_name:<14} pairs {len(pairs):5}  exact {exact:.0%}  within 1 point {within1:.0%}")
 
     def ai_avg(v):
+        if "ai:final" in v:
+            return v["ai:final"]
         vals = [r for w, r in v.items() if w.startswith("ai:")]
         return round(sum(vals) / len(vals)) if vals else None
 
@@ -163,7 +241,7 @@ def agreement() -> None:
     for h in humans:
         for j in ("ai:gemini", "ai:deepseek"):
             compare(h, j, lambda v, h=h: v.get(h), lambda v, j=j: v.get(j))
-        compare(h, "AI average", lambda v, h=h: v.get(h), ai_avg)
+        compare(h, "AI final", lambda v, h=h: v.get(h), ai_avg)
     split = [k for k, v in by.items() if "ai:gemini" in v and "ai:deepseek" in v and abs(v["ai:gemini"] - v["ai:deepseek"]) >= 2]
     print(f"pairs where the two AI judges differ by 2+ points (send to a human): {len(split)}")
 
@@ -172,6 +250,8 @@ if __name__ == "__main__":
     args = sys.argv[1:]
     if args and args[0] == "agreement":
         agreement()
+    elif args and args[0] == "crosscheck":
+        asyncio.run(crosscheck())
     else:
         only = {a.split("=", 1)[1] for a in args if a.startswith("--only=")} or None
         asyncio.run(rate_all(only))
