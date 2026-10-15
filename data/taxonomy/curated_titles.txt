@@ -1,0 +1,133 @@
+# Modern job titles -> O*NET-SOC, checked before the O*NET title list. One per line:
+#   regex on the normalized base title (lowercase, seniority words removed) | SOC code
+# First match wins, so put specific patterns before general ones.
+
+## Software and data
+\b(machine learning|ml|ai|deep learning|computer vision|nlp) (engineer|scientist|researcher)\b | 15-2051.00
+\b(data scientist|applied scientist|research scientist)\b | 15-2051.00
+\b(analytics engineer|data engineer|etl developer|big data engineer)\b | 15-1243.00
+\b(data analyst|business intelligence|bi analyst|bi developer|reporting analyst|insights analyst|product analyst|analytics)\b | 15-2051.01
+\bstatistician\b | 15-2041.00
+\b(qa|quality assurance|test|sdet|automation test)\w* (engineer|analyst|tester)\b | 15-1253.00
+\b(front ?end|frontend|ui) (engineer|developer)\b | 15-1254.00
+\bweb developer\b | 15-1254.00
+\b(security|cybersecurity|cyber security|soc|infosec|application security|appsec|penetration) (engineer|analyst|specialist|tester)\b | 15-1212.00
+\b(devops|site reliability|sre|platform|infrastructure|cloud|systems|build|release) (engineer|architect)\b | 15-1244.00
+\b(network) (engineer|architect)\b | 15-1241.00
+\b(solutions?|software|enterprise|technical) architect\b | 15-1299.08
+\b(database administrator|dba)\b | 15-1242.00
+\b(help desk|helpdesk|desktop support|it support|technical support|service desk) \w*\b | 15-1232.00
+\b(systems administrator|sysadmin|it administrator)\b | 15-1244.00
+\b(engineering manager|software development manager|head of engineering|it manager|director of engineering|cto)\b | 11-3021.00
+\b(it project manager|technical program manager|tpm)\b | 15-1299.09
+\b(software|backend|back end|full ?stack|fullstack|mobile|ios|android|embedded|firmware|game|application|java|python|golang|go|ruby|\.net|c\+\+|founding) (engineer|developer|programmer)\b | 15-1252.00
+\b(software engineer|software developer|developer|programmer|member of technical staff)\b | 15-1252.00
+
+## Product and design
+\b(product manager|product owner|group product manager|head of product)\b | 11-2021.00
+\b(product|ux|ui|ui/ux|ux/ui|interaction|visual|digital|web) designer\b | 15-1255.00
+\b(ux researcher|user researcher|design researcher)\b | 15-1255.00
+\b(graphic designer|brand designer|creative designer|production designer)\b | 27-1024.00
+\b(motion designer|animator|3d artist|vfx artist)\b | 27-1014.00
+\b(video editor|editor, video|post-production editor)\b | 27-4032.00
+\bindustrial designer\b | 27-1021.00
+
+## Sales, customer, marketing
+\b(sales development|sdr|bdr|business development representative|lead development)\b | 41-3091.00
+\b(account executive|ae|sales executive|sales representative|inside sales|outside sales|territory manager|account manager|sales consultant|sales associate b2b)\b | 41-3091.00
+\b(customer success|client success|customer success manager|csm|implementation manager|onboarding specialist)\b | 41-3091.00
+\b(sales manager|director of sales|head of sales|vp sales|sales director|regional sales)\b | 11-2022.00
+\b(solutions engineer|sales engineer|pre-?sales)\b | 41-4011.00
+\b(customer service|customer support|support specialist|support agent|call center|contact center|customer care|client service) \w*\b | 43-4051.00
+\b(retail sales|sales associate|store associate|retail associate)\b | 41-2031.00
+\b(store manager|assistant store manager|retail manager|shift supervisor)\b | 41-1011.00
+\bcashier\b | 41-2011.00
+\b(seo|sem|ppc|paid search|paid media|performance marketing|search marketing) \w*\b | 13-1161.01
+\b(marketing manager|head of marketing|marketing director|director of marketing|vp marketing|growth manager|brand manager|product marketing manager|demand generation manager|lifecycle marketing manager)\b | 11-2021.00
+\b(marketing|growth|content marketing|social media|digital marketing|email marketing|brand|community|partner marketing) (specialist|coordinator|associate|manager|strategist|lead)\b | 13-1161.00
+\b(market research|marketing analyst|consumer insights)\b | 13-1161.00
+\b(content writer|copywriter|content strategist|writer|editor)\b | 27-3043.00
+\btechnical writer\b | 27-3042.00
+\b(public relations|pr manager|communications manager|comms)\b | 27-3031.00
+\b(event planner|event manager|events coordinator|event coordinator)\b | 13-1121.00
+
+## Finance, accounting, legal
+\b(controller|treasurer)\b | 11-3031.01
+\b(finance manager|head of finance|director of finance|vp finance|cfo|finance director)\b | 11-3031.00
+\b(fp&a|financial analyst|finance analyst|investment analyst|equity research|investment banking analyst|investment banking associate|valuation analyst|corporate finance)\b | 13-2051.00
+\b(financial advisor|wealth advisor|financial planner)\b | 13-2052.00
+\b(credit analyst|credit risk analyst)\b | 13-2041.00
+\bunderwriter\b | 13-2053.00
+\b(accountant|staff accountant|senior accountant|cpa|auditor|tax associate|tax accountant|audit associate)\b | 13-2011.00
+\b(bookkeeper|accounts payable|accounts receivable|ap specialist|ar specialist|billing specialist|payroll specialist|accounting clerk)\b | 43-3031.00
+\b(compliance analyst|compliance officer|aml analyst|kyc analyst|compliance specialist)\b | 13-1041.00
+\b(compliance manager|head of compliance)\b | 11-9199.02
+\b(paralegal|legal assistant)\b | 23-2011.00
+\b(attorney|lawyer|counsel|general counsel|associate attorney)\b | 23-1011.00
+
+## People, operations, admin
+\b(recruiter|talent acquisition|sourcer|talent partner|recruiting coordinator|people partner|hr business partner|hrbp|hr generalist|hr specialist|people operations)\b | 13-1071.00
+\b(hr manager|head of people|director of people|vp people|people manager|human resources manager|chief people officer)\b | 11-3121.00
+\b(learning and development|l&d|training specialist|instructional designer|trainer|enablement)\b | 13-1151.00
+\b(project manager|program manager|project coordinator|pmo|delivery manager|scrum master)\b | 13-1082.00
+\b(business analyst|management consultant|strategy consultant|consultant|strategy and operations|bizops|business operations)\b | 13-1111.00
+\b(operations manager|general manager|head of operations|director of operations|coo|chief operating officer|operations director)\b | 11-1021.00
+\b(supply chain|logistics|demand planner|supply planner|inventory analyst|logistics coordinator)\b | 13-1081.00
+\b(buyer|purchasing|procurement)\b | 13-1023.00
+\b(executive assistant|chief of staff assistant)\b | 43-6011.00
+\b(administrative assistant|office manager|office administrator|admin assistant|office assistant|operations assistant)\b | 43-6014.00
+\breceptionist\b | 43-4171.00
+\b(forklift|reach truck|material handler equipment)\b | 53-7051.00
+\b(warehouse associate|warehouse worker|picker|packer|order selector|fulfillment associate|stocker|stock associate)\b | 53-7065.00
+\b(material handler|warehouse|loader|unloader|package handler|mover)\b | 53-7062.00
+\b(shipping|receiving|inventory clerk)\b | 43-5071.00
+\b(truck driver|cdl driver|delivery driver|class a driver)\b | 53-3032.00
+
+## Healthcare
+\b(nurse practitioner|np|fnp|aprn)\b | 29-1171.00
+\b(icu|critical care|emergency|er|ed|acute care) (rn|nurse|registered nurse)\b | 29-1141.01
+\b(registered nurse|rn|staff nurse|charge nurse|travel nurse|clinical nurse|nurse)\b | 29-1141.00
+\b(lpn|lvn|licensed practical nurse|licensed vocational nurse)\b | 29-2061.00
+\b(cna|certified nursing assistant|nursing assistant|patient care technician|pct|caregiver)\b | 31-1131.00
+\b(medical assistant|cma|ccma)\b | 31-9092.00
+\bphlebotomist\b | 31-9097.00
+\bpharmacy technician\b | 29-2052.00
+\bpharmacist\b | 29-1051.00
+\b(physical therapist|physiotherapist|pt)\b | 29-1123.00
+\b(occupational therapist|ot)\b | 29-1122.00
+\b(speech language pathologist|slp|speech therapist)\b | 29-1127.00
+\b(physician assistant|pa-c)\b | 29-1071.00
+\b(emt|paramedic)\b | 29-2042.00
+\b(radiologic technologist|x-ray technician|rad tech|mri technologist|ct technologist)\b | 29-2034.00
+\b(therapist|counselor|clinician|mental health)\b | 21-1014.00
+\b(social worker|case manager|lcsw|msw)\b | 21-1021.00
+\b(clinical research|crc|clinical trial)\b | 11-9121.01
+\b(practice manager|clinic manager|healthcare administrator|health services manager)\b | 11-9111.00
+
+## Education
+\b(preschool|pre-k|early childhood) (teacher|educator)\b | 25-2011.00
+\bkindergarten teacher\b | 25-2012.00
+\b(elementary|primary school) (teacher|educator)\b | 25-2021.00
+\bmiddle school \w* ?teacher\b | 25-2022.00
+\b(high school|secondary) \w* ?teacher\b | 25-2031.00
+\bsubstitute teacher\b | 25-3031.00
+\b(curriculum|instructional) (designer|developer|coordinator|specialist)\b | 25-9031.00
+\b(childcare|nanny|daycare)\b | 39-9011.00
+
+## Hospitality, food, trades, engineering
+\bbarista\b | 35-3023.01
+\b(server|waiter|waitress)\b | 35-3031.00
+\b(line cook|prep cook|cook|chef de partie|sous chef)\b | 35-2014.00
+\b(restaurant manager|kitchen manager|food service manager)\b | 11-9051.00
+\b(front desk|hotel desk|guest services agent)\b | 43-4081.00
+\b(security officer|security guard)\b | 33-9032.00
+\b(hvac|hvac technician|refrigeration)\b | 49-9021.00
+\belectrician\b | 47-2111.00
+\b(plumber|pipefitter)\b | 47-2152.00
+\bcarpenter\b | 47-2031.00
+\bwelder\b | 51-4121.00
+\b(construction manager|project superintendent|site manager|superintendent)\b | 11-9021.00
+\bmechanical engineer\b | 17-2141.00
+\belectrical engineer\b | 17-2071.00
+\b(civil engineer|structural engineer)\b | 17-2051.00
+\b(industrial engineer|manufacturing engineer|process engineer)\b | 17-2112.00
