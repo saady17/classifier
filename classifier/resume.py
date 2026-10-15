@@ -129,16 +129,56 @@ def _merged_years(spans: list[tuple[date, date]]) -> float:
     return round(total / 365.25, 1)
 
 
-_SPLIT = re.compile(r"\s*(?:\||•|·|,|\s[-–—]\s|\sat\s|@)\s*")
+_SPLIT = re.compile(r"\s*(?:\||•|●|▪|·|,|\s[-–—]\s|\sat\s|@|\t)\s*")
+# A job title names a role. Without one of these words (or an exact known title) a line is a
+# company, a location, a project or a sentence, not a title.
+ROLE_WORDS = re.compile(
+    r"\b(engineer|developer|programmer|architect|analyst|scientist|researcher|manager|director|head|lead|"
+    r"officer|executive|president|vp|founder|co-founder|owner|partner|principal|consultant|advisor|adviser|"
+    r"specialist|coordinator|associate|assistant|administrator|admin|representative|rep|agent|clerk|"
+    r"technician|technologist|tech|designer|artist|writer|editor|producer|strategist|marketer|recruiter|"
+    r"accountant|auditor|controller|bookkeeper|nurse|rn|lpn|np|physician|doctor|therapist|pharmacist|"
+    r"counselor|teacher|tutor|instructor|professor|lecturer|educator|ta|intern|internship|trainee|apprentice|"
+    r"fellow|volunteer|operator|driver|cashier|server|barista|cook|chef|supervisor|foreman|worker|handler|"
+    r"associate|attorney|lawyer|paralegal|underwriter|broker|banker|trader|planner|buyer|scheduler|"
+    r"receptionist|secretary|generalist|investigator|inspector|mechanic|electrician|welder|carpenter|"
+    r"plumber|caregiver|aide|assistant|steward|ambassador|organizer|owner|member of technical staff|sde|swe|"
+    r"devops|sre|qa|pm|ux|ui)s?\b",
+    re.I,
+)
+_SIDE_JOB = re.compile(r"\b(student|part[- ]time|campus|seasonal|volunteer|server|barista|cashier|crew member|tutor)\b", re.I)
+_NOT_TITLE = re.compile(r"^(present|current|now|today|ongoing|remote|hybrid|onsite|full[- ]time|part[- ]time|contract)$", re.I)
+
+
+_GLUED = re.compile(rf"(?<=[a-z)\]])(?=(?:{_MONTHS})[a-z]*\.?\s*\d{{2,4}})|(?<=[A-Za-z)])(?=\d{{4}}\s*[-–—])", re.I)
+
+
+def _unglue(line: str) -> str:
+    """PDF text sometimes loses the space before the dates: "Researcher)Jan 2022", "Streamlit2025–Present"."""
+    return _GLUED.sub(" ", line)
+
+
+def _title_like(part: str) -> bool:
+    words = part.split()
+    if not 1 <= len(words) <= 7 or len(part) > 70 or _NOT_TITLE.match(part) or ":" in part:
+        return False
+    if re.search(r"\d{4}|%|\$", part) or part[:1].islower():
+        return False  # dates, metrics, or a sentence fragment
+    capitalized = sum(1 for w in words if w[:1].isupper() or not w[:1].isalpha())
+    if capitalized < 0.6 * len(words):
+        return False  # titles are written in Title Case or CAPS
+    return bool(ROLE_WORDS.search(part))
 
 
 def _best_title(candidates: list[str]) -> tuple[str | None, str | None, float]:
     ix = title_index()
     best = (None, None, 0.0)
     for cand in candidates:
+        cand = re.sub(r"^[\s●•▪*\-–]+", "", cand)
+        cand = _RANGE.sub(" | ", _unglue(cand))  # drop the dates before splitting on dashes
         for part in _SPLIT.split(cand):
-            part = _RANGE.sub("", part).strip(" ()")
-            if not part or len(part) > 70 or len(part.split()) > 8 or re.search(r"\d{4}", part):
+            part = part.strip(" ()|")
+            if not part or not _title_like(part):
                 continue
             code, conf = ix.occupation(part)
             if conf > best[2]:
@@ -155,7 +195,7 @@ def parse_resume(text: str) -> ResumeProfile:
     in_exp = [i for i, (sec, _) in enumerate(lines) if sec == "experience"]
     scan = in_exp or [i for i, (sec, _) in enumerate(lines) if sec not in ("education",)]
     for i in scan:
-        m = _RANGE.search(plain[i])
+        m = _RANGE.search(_unglue(plain[i]))
         if not m:
             continue
         start, end = _parse_date(m.group(1), False), _parse_date(m.group(2), True)
@@ -170,12 +210,16 @@ def parse_resume(text: str) -> ResumeProfile:
     full = [(r.start, r.end) for r in profile.roles if r.level > 0]
     profile.years = _merged_years(full) + 0.25 * _merged_years([(r.start, r.end) for r in profile.roles if r.level == 0])
     if profile.roles:
-        current = profile.roles[0]
-        profile.current_title, profile.occupation, profile.level = current.title, current.occupation, current.level
         for rank, role in enumerate(profile.roles[:6]):
             if role.occupation:
                 weight = 1.0 / (1 + rank) * max(0.3, min(1.0, (role.end - role.start).days / 730))
+                if _SIDE_JOB.search(role.title):
+                    weight *= 0.35  # a student or part-time job alongside a career says less about the field
                 profile.occupations[role.occupation] = profile.occupations.get(role.occupation, 0) + weight
+        # The main occupation is the strongest across the history, not just the newest role.
+        main = max(profile.occupations, key=profile.occupations.get) if profile.occupations else None
+        current = next((r for r in profile.roles if r.occupation == main), profile.roles[0])
+        profile.current_title, profile.occupation, profile.level = current.title, current.occupation, current.level
         if profile.level == 2 and profile.years >= 7:
             profile.level = 3  # long experience without a level word in the title
         if profile.years < 1.5 and profile.level >= 2:

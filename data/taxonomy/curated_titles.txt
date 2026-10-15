@@ -6,7 +6,8 @@
 \b(machine learning|ml|ai|deep learning|computer vision|nlp) (engineer|scientist|researcher)\b | 15-2051.00
 \b(data scientist|applied scientist|research scientist)\b | 15-2051.00
 \b(analytics engineer|data engineer|etl developer|big data engineer)\b | 15-1243.00
-\b(data analyst|business intelligence|bi analyst|bi developer|reporting analyst|insights analyst|product analyst|analytics)\b | 15-2051.01
+\b(data analyst|business intelligence|bi analyst|bi developer|bi engineer|reporting analyst|insights analyst|product analyst|analytics)\b | 15-2051.01
+\bdata\b.*\banalyst\b|\banalyst\b.*\bdata\b|\bresearch analyst\b | 15-2051.01
 \bstatistician\b | 15-2041.00
 \b(qa|quality assurance|test|sdet|automation test)\w* (engineer|analyst|tester)\b | 15-1253.00
 \b(front ?end|frontend|ui) (engineer|developer)\b | 15-1254.00

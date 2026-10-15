@@ -31,6 +31,27 @@ PRIVATE = "eval/private"
 POOLS = f"{PRIVATE}/pools.json"
 RATINGS = f"{PRIVATE}/ratings.db"
 FROM_RANKER, FROM_KEYWORDS, FROM_RANDOM = 12, 8, 5
+
+# Broad fields for filtering the rating page, from the resume's O*NET occupation.
+FIELDS = [
+    ("data", ("15-2051", "15-2041", "15-2031", "15-20")),
+    ("software", ("15-12", "11-3021", "15-1299")),
+    ("sales", ("41-", "11-2022")),
+    ("marketing", ("11-2021", "13-1161", "27-3031", "11-2032")),
+    ("healthcare", ("29-", "31-", "11-9111", "21-1014")),
+    ("finance", ("13-2", "11-3031", "43-3031")),
+    ("design", ("27-1", "15-1255")),
+    ("people-ops", ("13-1071", "11-3121", "13-1151", "11-1021", "13-1111", "13-1082", "13-1081", "13-1023", "43-")),
+    ("education", ("25-",)),
+    ("engineering", ("17-",)),
+]
+
+
+def field_of(occupation: str | None) -> str:
+    for name, prefixes in FIELDS:
+        if occupation and occupation.startswith(prefixes):
+            return name
+    return "other"
 TEST_SHARE = 1 / 3
 
 
@@ -96,8 +117,9 @@ def build_pools() -> None:
                 "location": "; ".join(loc["raw"] for loc in locs[:3]), "description": row["description"][:8000],
             }
         pools[rid] = {"file": name, "text": text, "split": split_of(rid), "order": picked, "jobs": jobs,
+                      "field": field_of(resume.occupation), "title": resume.current_title,
                       "built": datetime.now(timezone.utc).isoformat(timespec="seconds")}
-        print(f"  {name}: {len(picked)} jobs ({pools[rid]['split']})", flush=True)
+        print(f"  {name}: {pools[rid]['field']} / {resume.current_title} -> {len(picked)} jobs ({pools[rid]['split']})", flush=True)
         json.dump(pools, open(POOLS, "w"))
     print(f"{len(pools)} resumes pooled")
 
@@ -180,7 +202,7 @@ button:hover{{border-color:var(--accent)}} .bar{{position:sticky;bottom:0;backgr
 <header><b>Rate matches</b><span class="muted">{who} · {done}/{total} rated</span><span class="muted">{guide}</span></header>
 <main><section><h2>Resume</h2>{resume}</section>
 <section><h2>{title}</h2><div class="muted">{company} · {location} · {remote} · <a href="{url}" target="_blank" rel="noopener">posting</a></div><hr>{description}</section></main>
-<div class="bar"><form method="post" action="/eval/rate">
+<div class="bar"><form method="post" action="/eval/rate?field={field}">
 <input type="hidden" name="resume_id" value="{rid}"><input type="hidden" name="job_id" value="{jid}">
 <button name="rating" value="0">0 not a fit</button><button name="rating" value="1">1 weak</button>
 <button name="rating" value="2">2 good</button><button name="rating" value="3">3 great</button>
@@ -191,8 +213,10 @@ button:hover{{border-color:var(--accent)}} .bar{{position:sticky;bottom:0;backgr
 
 def mount(app, rater_dep) -> None:
     @app.get("/eval", response_class=HTMLResponse)
-    def next_pair(who: str = Depends(rater_dep)):
-        pools = _load_pools()
+    def next_pair(field: str = "", who: str = Depends(rater_dep)):
+        """?field=software,sales shows only resumes from those fields."""
+        wanted = {f.strip() for f in field.split(",") if f.strip()}
+        pools = {k: v for k, v in _load_pools().items() if not wanted or v.get("field") in wanted}
         db = _ratings_db()
         mine = {(r, j) for r, j in db.execute("SELECT resume_id, job_id FROM ratings WHERE rater=?", (who,))}
         total = sum(len(p["order"]) for p in pools.values())
@@ -205,18 +229,19 @@ def mount(app, rater_dep) -> None:
                         who=html.escape(who), done=len(mine), total=total, guide=GUIDE, resume=html.escape(pool["text"]),
                         title=html.escape(job["title"]), company=html.escape(job["company"]), location=html.escape(job["location"] or "—"),
                         remote=job["remote"], url=html.escape(job["url"]), description=html.escape(job["description"]), rid=rid, jid=html.escape(jid),
+                        field=html.escape(field),
                     )
         return HTMLResponse("<p style='font:16px system-ui;padding:24px'>All done. Thank you!</p>")
 
     @app.post("/eval/rate")
-    def save(resume_id: str = Form(...), job_id: str = Form(...), rating: int = Form(...), who: str = Depends(rater_dep)):
+    def save(resume_id: str = Form(...), job_id: str = Form(...), rating: int = Form(...), field: str = "", who: str = Depends(rater_dep)):
         if rating in (0, 1, 2, 3, -1):
             db = _ratings_db()
             # -1 is a skip: remembered so the pair is not shown again, ignored by the metrics.
             db.execute("INSERT OR REPLACE INTO ratings VALUES (?,?,?,?,?)",
                        (resume_id, job_id, who, rating, datetime.now(timezone.utc).isoformat(timespec="seconds")))
             db.commit()
-        return RedirectResponse("/eval", status_code=303)
+        return RedirectResponse(f"/eval?field={field}" if field else "/eval", status_code=303)
 
 
 if __name__ == "__main__":

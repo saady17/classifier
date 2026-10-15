@@ -97,3 +97,32 @@ def test_rank_only_scores_the_given_jobs():
     resume = parse_resume(open("tests/fixtures/resume_nurse.txt").read())
     got = [m.job_id for m in rank(resume, Preferences(), limit=50, db=db, only=ids, group=False)]
     assert set(got) <= set(ids)
+
+
+@pytest.mark.parametrize("line,title", [
+    ("Data Analyst Feb 2026 - Present", "Data Analyst"),
+    ("Financial Analyst Sept 2022 – Jul 2024", "Financial Analyst"),
+    ("Data Scientist / ML Research Scientist (Graduate RA)Jan 2022 – Present", None),  # any title found is fine
+    ("Present", ""),
+    ("cleaned and normalized datasets", ""),
+    ("PROJECT 4: Data Analytics & Forecast Modeling", ""),
+])
+def test_title_lines(line, title):
+    from classifier.resume import _best_title
+
+    found = _best_title([line])[0]
+    if title is None:
+        assert found
+    elif title == "":
+        assert found is None
+    else:
+        assert found == title
+
+
+def test_side_job_does_not_decide_the_field():
+    text = (
+        "EXPERIENCE\nStudent Server Sept 2025 – Present\nServed guests\n"
+        "Data Analyst Aug 2022 – July 2025\nSQL, Python, Tableau dashboards\n"
+    )
+    r = parse_resume(text)
+    assert r.current_title == "Data Analyst"
