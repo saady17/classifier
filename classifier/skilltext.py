@@ -1,17 +1,17 @@
-"""Tokenizer shared by the skills dictionary and the matcher. Keeps C++, C#, .NET, CI/CD, A/B, FP&A,
-ICD-10 and similar names whole."""
+"""Tokenizer shared by the skills dictionary and the matcher. Keeps C++, C#, .NET, FP&A and ICD-10 whole;
+splits on "/" so "Python/Java" is two skills (CI/CD becomes "ci", "cd" on both sides and still matches)."""
 
 from __future__ import annotations
 
 import re
 import unicodedata
 
-_TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9+#.&/'-]*[A-Za-z0-9+#]|[A-Za-z0-9][+#]*|\.[A-Za-z]+")
+TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9+#.&'-]*[A-Za-z0-9+#]|[A-Za-z0-9][+#]*|\.[A-Za-z]+")
 
 
 def raw_tokens(text: str) -> list[str]:
     text = unicodedata.normalize("NFKC", text)
-    return _TOKEN.findall(text)
+    return TOKEN_RE.findall(text)
 
 
 def fold(token: str) -> str:

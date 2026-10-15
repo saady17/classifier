@@ -247,7 +247,7 @@ Insurance | insurance; claims adjusting; claims processing | finance
 Recruiting | recruiting; recruitment; talent acquisition; candidate sourcing; full-cycle recruiting; full cycle recruiting | hr
 HR generalist | human resources; hr generalist; hr operations | hr
 Employee relations | employee relations; labor relations; labour relations | hr
-Compensation and benefits | compensation; benefits administration; total rewards | hr
+Compensation and benefits | compensation and benefits; compensation analysis; compensation planning; benefits administration; total rewards | hr
 HRIS | hris; workday; bamboohr; successfactors | hr
 Onboarding | onboarding; employee onboarding | hr
 Learning and development | learning and development; l&d; training and development; instructional design | hr

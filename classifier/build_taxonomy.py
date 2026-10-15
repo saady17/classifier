@@ -37,6 +37,9 @@ def load_curated():
     return skills
 
 
+# O*NET entries that are company names more than skills.
+TOO_VAGUE = {"Google", "Apple", "Microsoft", "Amazon", "Oracle", "IBM", "Meta"}
+
 GENERIC_SOFTWARE = re.compile(r"\bsoftware\b|\bsystems?\b$|\bprograms?\b$|\bapplications?\b$|\bplatform\b$")
 
 
@@ -60,6 +63,11 @@ def onet_aliases(name: str, vendors: set[str]) -> list[str]:
     return sorted(out)
 
 
+def common_word(token: str, lower: collections.Counter, upper: collections.Counter) -> bool:
+    """Seen often in job posts in any case ("Navigator", "Workspace"): too risky as a bare alias."""
+    return lower[token] + upper[token] >= 30
+
+
 def build_skills(corpus_lower: collections.Counter, corpus_upper: collections.Counter):
     curated = load_curated()
     alias_owner = {}
@@ -81,6 +89,8 @@ def build_skills(corpus_lower: collections.Counter, corpus_upper: collections.Co
     by_name = {s["name"]: s for s in curated}
     added = 0
     for example, socs in by_example.items():
+        if example in TOO_VAGUE:
+            continue
         words = example.split()
         # Category names ("Email software", "Web browser software") are not skills.
         if words[-1].lower() == "software" and all(w.islower() for w in words[1:]):
@@ -97,6 +107,8 @@ def build_skills(corpus_lower: collections.Counter, corpus_upper: collections.Co
             # living"); those need the full product name. Curated skills handle the important ones.
             if not k or (len(k) == 1 and len(k[0]) <= 4):
                 continue
+            if len(k) == 1 and a != example and common_word(k[0], corpus_lower, corpus_upper):
+                continue  # bare product word left after removing the vendor, and it is common
             if len(k) == 1:
                 low, up = corpus_lower[k[0]], corpus_upper[k[0]]
                 # An everyday word in job posts ("access", "teams", "database"), even capitalized in
