@@ -4,13 +4,14 @@ data/sources.yaml. Run it when adding companies:  python -m classifier.discover"
 from __future__ import annotations
 
 import asyncio
+import os
 
 import yaml
 
 from classifier.sources import client
 
-CANDIDATES_FILE = "data/candidates.yaml"
-SOURCES_FILE = "data/sources.yaml"
+CANDIDATES_FILE = os.environ.get("CANDIDATES", "data/candidates.yaml")
+SOURCES_FILE = os.environ.get("SOURCES_OUT", "data/sources.yaml")
 
 PROBES = {
     "greenhouse": ("https://boards-api.greenhouse.io/v1/boards/{}/jobs", lambda d: len(d.get("jobs", []))),

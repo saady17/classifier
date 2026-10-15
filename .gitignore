@@ -9,3 +9,4 @@ __pycache__/
 /eval/resumes/
 /eval/private/
 .env
+/data/*.log

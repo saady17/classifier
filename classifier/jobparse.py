@@ -121,6 +121,16 @@ def _degree(text: str) -> int:
     return min(found) if found else 0
 
 
+def _names_employer(skill: str, company: str) -> bool:
+    """'LinkedIn' at LinkedIn, 'Epic' at Epic Games, 'Datadog' at Datadog."""
+    sk = re.sub(r"[^a-z0-9 ]", "", skill.lower()).split()
+    co = re.sub(r"[^a-z0-9 ]", " ", company.lower()).split()
+    if not sk or not co:
+        return False
+    joined = "".join(co)
+    return "".join(sk) in (joined, joined + "software") or (len(sk) == 1 and sk[0] == co[0])
+
+
 def parse_job(description: str, company: str = "") -> JobProfile:
     m = matcher()
     company_key = re.sub(r"[^a-z0-9]", "", company.lower())
@@ -134,7 +144,7 @@ def parse_job(description: str, company: str = "") -> JobProfile:
         found = m.find(line)
         if company_key:
             # The employer's own product is not a requirement ("LinkedIn" at LinkedIn).
-            found = {k: v for k, v in found.items() if re.sub(r"[^a-z0-9]", "", k.lower()) not in (company_key, company_key + "software")}
+            found = {k: v for k, v in found.items() if not _names_employer(k, company)}
         if kind == PREF or (kind in (REQ, BODY, DUTY) and _LINE_PREF.search(line)):
             bucket, store = pref_lines, profile.preferred
         elif kind == DUTY:

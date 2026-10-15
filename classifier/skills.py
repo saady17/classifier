@@ -12,7 +12,7 @@ from classifier.skilltext import TOKEN_RE, fold, raw_tokens
 MAX_NGRAM = 6
 # Skills whose plain name is an everyday word in job posts ("ensure compliance", "networking events");
 # only their specific aliases count.
-NAME_NOT_AN_ALIAS = {"Compliance", "Networking", "Communications", "Communication", "Collaboration", "Insurance"}
+NAME_NOT_AN_ALIAS = {"Compliance", "Networking", "Communications", "Communication", "Collaboration", "Insurance", "Lean"}
 _SENTENCE_END = re.compile(r"(^|[.!?:;•\n]\s*|\n\s*-\s*)$")
 
 
@@ -36,7 +36,8 @@ class SkillMatcher:
             name = item["name"]
             self.skills[name] = Skill(name, item["category"], item["source"], tuple(item.get("occupations", [])))
             aliases = list(item["aliases"])
-            if name not in NAME_NOT_AN_ALIAS and not any(a.lstrip("=") == name for a in aliases):
+            # Very short names ("C") are never matched loosely; their aliases spell them out.
+            if name not in NAME_NOT_AN_ALIAS and len(name) > 2 and not any(a.lstrip("=") == name for a in aliases):
                 # The canonical name is an alias too, unless it is a case-sensitive word like "Go".
                 aliases.append(("=" + name) if any(a.startswith("=") and a[1:].lower() == name.lower() for a in aliases) else name)
             for alias in aliases:
