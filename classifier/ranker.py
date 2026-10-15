@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 import sqlite3
 from dataclasses import dataclass, field
@@ -25,7 +26,7 @@ CANDIDATES_OCC = 1500
 SOFT_WEIGHT = 0.25  # communication, leadership... matter, but say little about fit
 CATEGORY_WEIGHT = {"soft": SOFT_WEIGHT, "spoken_language": 0.6}
 
-WEIGHTS = {
+HAND_WEIGHTS = {
     "required_skills": 0.30,
     "preferred_skills": 0.06,
     "skill_overlap": 0.10,
@@ -37,6 +38,18 @@ WEIGHTS = {
     "freshness": 0.03,
     "visa": 0.02,
 }
+
+
+def _load_weights() -> dict[str, float]:
+    """Weights learned from ratings (classifier.tune) when available, otherwise the hand-set ones."""
+    try:
+        learned = json.load(open(os.environ.get("CLASSIFIER_WEIGHTS", "data/weights.json")))
+        return {k: float(learned.get(k, v)) for k, v in HAND_WEIGHTS.items()}
+    except (OSError, ValueError):
+        return dict(HAND_WEIGHTS)
+
+
+WEIGHTS = _load_weights()
 
 
 @dataclass
@@ -211,14 +224,42 @@ def _combine(f: dict[str, float]) -> float:
     return 100 * total / weight if weight else 0.0
 
 
-def rank(resume: ResumeProfile, prefs: Preferences | None = None, limit: int = 50, db: sqlite3.Connection | None = None) -> list[Match]:
+def bm25_scores(resume: ResumeProfile, db: sqlite3.Connection, limit: int = CANDIDATES_FTS, only: list[str] | None = None) -> dict[str, float]:
+    """Plain keyword relevance (higher is better). Also the baseline the ranker must beat."""
+    query = _query_terms(resume)
+    if not query:
+        return {}
+    extra, args = "", [query]
+    if only:
+        extra = f" AND j.id IN ({','.join('?' * len(only))})"
+        args += only
+    rows = db.execute(
+        "SELECT j.id, bm25(jobs_fts, 4.0, 1.0, 1.0) AS s FROM jobs_fts JOIN jobs j ON j.rowid = jobs_fts.rowid "
+        f"WHERE jobs_fts MATCH ?{extra} ORDER BY s LIMIT ?",
+        (*args, limit),
+    )
+    return {row["id"]: -row["s"] for row in rows}
+
+
+def rank(
+    resume: ResumeProfile,
+    prefs: Preferences | None = None,
+    limit: int = 50,
+    db: sqlite3.Connection | None = None,
+    only: list[str] | None = None,
+    group: bool = True,
+) -> list[Match]:
+    """Top matches. `only` scores exactly these job ids (evaluation pools) instead of searching."""
     prefs = prefs or Preferences()
     db = db or store.connect()
     weights = _skill_weights(db)
 
     # 1. Candidates: keyword search over the resume's skills and titles, plus same/related occupations.
     candidates: dict[str, float] = {}
-    query = _query_terms(resume)
+    if only:
+        candidates = {jid: 0.0 for jid in only}
+        candidates.update(bm25_scores(resume, db, limit=len(only), only=only))
+    query = None if only else _query_terms(resume)
     if query:
         for row in db.execute(
             "SELECT j.id, bm25(jobs_fts, 4.0, 1.0, 1.0) AS s FROM jobs_fts JOIN jobs j ON j.rowid = jobs_fts.rowid "
@@ -227,7 +268,7 @@ def rank(resume: ResumeProfile, prefs: Preferences | None = None, limit: int = 5
         ):
             candidates[row["id"]] = -row["s"]
     ix = title_index()
-    related = set(resume.occupations)
+    related = set() if only else set(resume.occupations)
     for code in list(resume.occupations):
         related |= {c for c, tier in ix.occupations.get(code, {}).get("related", {}).items() if tier.startswith("Primary")}
     if related:
@@ -313,6 +354,8 @@ def rank(resume: ResumeProfile, prefs: Preferences | None = None, limit: int = 5
                 )
             )
     results.sort(key=lambda m: -m.score)
+    if not group:
+        return results[:limit]
     # The same role posted in several cities: keep the best-scoring posting, note the others.
     grouped: dict[tuple[str, str], Match] = {}
     for m in results:
