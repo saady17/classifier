@@ -268,9 +268,11 @@ def rank(
         ):
             candidates[row["id"]] = -row["s"]
     ix = title_index()
-    related = set() if only else set(resume.occupations)
-    for code in list(resume.occupations):
-        related |= {c for c, tier in ix.occupations.get(code, {}).get("related", {}).items() if tier.startswith("Primary")}
+    related: set[str] = set()
+    if not only:  # a fixed evaluation pool is scored as-is
+        related = set(resume.occupations)
+        for code in list(resume.occupations):
+            related |= {c for c, tier in ix.occupations.get(code, {}).get("related", {}).items() if tier.startswith("Primary")}
     if related:
         marks = ",".join("?" * len(related))
         for (jid,) in db.execute(

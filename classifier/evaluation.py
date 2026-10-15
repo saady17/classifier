@@ -118,9 +118,12 @@ def precision_at(ranked: list[str], rel: dict[str, float], k: int = 10, good: fl
     return sum(1 for j in top if rel.get(j, 0) >= good) / len(top) if top else math.nan
 
 
-def averaged_ratings() -> dict[str, dict[str, float]]:
+def averaged_ratings(raters: str | None = None) -> dict[str, dict[str, float]]:
+    """Mean rating per (resume, job). raters: "all" (default), "ai" or "human" (env EVAL_RATERS)."""
+    raters = raters or os.environ.get("EVAL_RATERS", "all")
+    where = {"ai": " AND rater LIKE 'ai:%'", "human": " AND rater NOT LIKE 'ai:%'"}.get(raters, "")
     out: dict[str, dict[str, list[int]]] = {}
-    for rid, jid, r in _ratings_db().execute("SELECT resume_id, job_id, rating FROM ratings WHERE rating >= 0"):
+    for rid, jid, r in _ratings_db().execute("SELECT resume_id, job_id, rating FROM ratings WHERE rating >= 0" + where):
         out.setdefault(rid, {}).setdefault(jid, []).append(r)
     return {rid: {j: sum(v) / len(v) for j, v in jobs.items()} for rid, jobs in out.items()}
 

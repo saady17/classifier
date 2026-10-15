@@ -82,3 +82,18 @@ def test_resumes(name, title, years, degree, country):
     assert r.current_title == title
     assert abs(r.years - years) < 0.6  # "Present" moves with today's date
     assert r.degree == degree and r.location_country == country
+
+
+def test_rank_only_scores_the_given_jobs():
+    import os
+
+    if not os.path.exists("data/jobs.db"):
+        pytest.skip("no job store")
+    from classifier import store
+    from classifier.ranker import Preferences, rank
+
+    db = store.connect()
+    ids = [r[0] for r in db.execute("SELECT id FROM jobs WHERE duplicate_of IS NULL AND countries LIKE '%,US,%' LIMIT 15")]
+    resume = parse_resume(open("tests/fixtures/resume_nurse.txt").read())
+    got = [m.job_id for m in rank(resume, Preferences(), limit=50, db=db, only=ids, group=False)]
+    assert set(got) <= set(ids)
