@@ -64,6 +64,10 @@ def _ratings_db() -> sqlite3.Connection:
         "CREATE TABLE IF NOT EXISTS ratings (resume_id TEXT, job_id TEXT, rater TEXT, rating INTEGER, at TEXT, "
         "PRIMARY KEY (resume_id, job_id, rater))"
     )
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS comments (resume_id TEXT, job_id TEXT, rater TEXT, comment TEXT, at TEXT, "
+        "PRIMARY KEY (resume_id, job_id, rater))"
+    )
     return db
 
 
@@ -198,13 +202,14 @@ main{{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:16px}}
 @media (max-width:800px){{main{{grid-template-columns:1fr}}}}
 section{{background:var(--card);border:1px solid var(--edge);border-radius:12px;padding:16px;max-height:70vh;overflow:auto;white-space:pre-wrap}}
 h2{{margin:0 0 4px;font-size:18px}} .muted{{color:var(--muted)}}
-form{{display:flex;gap:8px;flex-wrap:wrap}} button{{font:inherit;font-weight:600;padding:10px 18px;border-radius:10px;border:1px solid var(--edge);background:var(--card);color:var(--fg);cursor:pointer}}
+form{{display:flex;gap:8px;flex-wrap:wrap}} textarea{{flex:1 1 100%;font:inherit;padding:8px 10px;border-radius:10px;border:1px solid var(--edge);background:var(--card);color:var(--fg)}} button{{font:inherit;font-weight:600;padding:10px 18px;border-radius:10px;border:1px solid var(--edge);background:var(--card);color:var(--fg);cursor:pointer}}
 button:hover{{border-color:var(--accent)}} .bar{{position:sticky;bottom:0;background:var(--bg);padding:12px 16px;border-top:1px solid var(--edge)}}
 </style></head><body>
 <header><b>Rate matches</b><span class="muted">{who} · {done}/{total} rated</span><span class="muted">{guide}</span></header>
 <main><section><h2>Resume</h2>{resume}</section>
 <section><h2>{title}</h2><div class="muted">{company} · {location} · {remote} · <a href="{url}" target="_blank" rel="noopener">posting</a></div><hr>{description}</section></main>
-<div class="bar"><form method="post" action="/eval/rate?field={field}">
+<div class="bar"><form method="post" action="/eval/rate?field={field}&set={set}">
+<textarea name="comment" rows="2" placeholder="Your notes or assumptions (optional), e.g. 'needs a CA license', 'title fits but too senior'"></textarea>
 <input type="hidden" name="resume_id" value="{rid}"><input type="hidden" name="job_id" value="{jid}">
 <button name="rating" value="0">0 not a fit</button><button name="rating" value="1">1 weak</button>
 <button name="rating" value="2">2 good</button><button name="rating" value="3">3 great</button>
@@ -215,10 +220,11 @@ button:hover{{border-color:var(--accent)}} .bar{{position:sticky;bottom:0;backgr
 
 def mount(app, rater_dep) -> None:
     @app.get("/eval", response_class=HTMLResponse)
-    def next_pair(field: str = "", who: str = Depends(rater_dep)):
-        """?field=software,sales shows only resumes from those fields."""
+    def next_pair(field: str = "", set: str = "", who: str = Depends(rater_dep)):
+        """?field=software,sales shows only those fields; ?set=check only the human check set."""
         wanted = {f.strip() for f in field.split(",") if f.strip()}
-        pools = {k: v for k, v in _load_pools().items() if not wanted or v.get("field") in wanted}
+        pools = {k: v for k, v in _load_pools().items()
+                 if (not wanted or v.get("field") in wanted) and (set != "check" or v.get("check"))}
         db = _ratings_db()
         mine = {(r, j) for r, j in db.execute("SELECT resume_id, job_id FROM ratings WHERE rater=?", (who,))}
         total = sum(len(p["order"]) for p in pools.values())
@@ -231,20 +237,41 @@ def mount(app, rater_dep) -> None:
                         who=html.escape(who), done=len(mine), total=total, guide=GUIDE, resume=html.escape(pool["text"]),
                         title=html.escape(job["title"]), company=html.escape(job["company"]), location=html.escape(job["location"] or "—"),
                         remote=job["remote"], url=html.escape(job["url"]), description=html.escape(job["description"]), rid=rid, jid=html.escape(jid),
-                        field=html.escape(field),
+                        field=html.escape(field), set=html.escape(set),
                     )
         return HTMLResponse("<p style='font:16px system-ui;padding:24px'>All done. Thank you!</p>")
 
     @app.post("/eval/rate")
-    def save(resume_id: str = Form(...), job_id: str = Form(...), rating: int = Form(...), field: str = "", who: str = Depends(rater_dep)):
+    def save(resume_id: str = Form(...), job_id: str = Form(...), rating: int = Form(...), comment: str = Form(""),
+             field: str = "", set: str = "", who: str = Depends(rater_dep)):
         if rating in (0, 1, 2, 3, -1):
             db = _ratings_db()
             # -1 is a skip: remembered so the pair is not shown again, ignored by the metrics.
-            db.execute("INSERT OR REPLACE INTO ratings VALUES (?,?,?,?,?)",
-                       (resume_id, job_id, who, rating, datetime.now(timezone.utc).isoformat(timespec="seconds")))
+            stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            db.execute("INSERT OR REPLACE INTO ratings VALUES (?,?,?,?,?)", (resume_id, job_id, who, rating, stamp))
+            if comment.strip():
+                db.execute("INSERT OR REPLACE INTO comments VALUES (?,?,?,?,?)", (resume_id, job_id, who, comment.strip()[:2000], stamp))
             db.commit()
-        return RedirectResponse(f"/eval?field={field}" if field else "/eval", status_code=303)
+        query = "&".join(f"{k}={v}" for k, v in (("field", field), ("set", set)) if v)
+        return RedirectResponse("/eval" + (f"?{query}" if query else ""), status_code=303)
+
+
+def choose_check_set(software: int = 7, sales: int = 3, seed: int = 10) -> None:
+    """Marks a fixed random set of resumes for human rating (/eval?set=check); only resumes whose
+    work history was read (so the rater is not judging a parsing failure)."""
+    pools = _load_pools()
+    rng = random.Random(seed)
+    chosen = []
+    for field, n in (("software", software), ("sales", sales)):
+        ok = [rid for rid, p in sorted(pools.items()) if p.get("field") == field and parse_resume(p["text"]).roles]
+        chosen += rng.sample(ok, min(n, len(ok)))
+    for rid, p in pools.items():
+        p["check"] = rid in chosen
+    json.dump(pools, open(POOLS, "w"))
+    for rid in chosen:
+        print(f"  {pools[rid]['field']:9} {pools[rid].get('title')}")
+    print(f"{len(chosen)} resumes in the human check set")
 
 
 if __name__ == "__main__":
-    {"pools": build_pools, "report": report}[sys.argv[1]]()
+    {"pools": build_pools, "report": report, "check-set": choose_check_set}[sys.argv[1]]()
