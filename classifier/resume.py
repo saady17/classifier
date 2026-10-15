@@ -129,7 +129,7 @@ def _merged_years(spans: list[tuple[date, date]]) -> float:
     return round(total / 365.25, 1)
 
 
-_SPLIT = re.compile(r"\s*(?:\||•|●|▪|·|,|\s[-–—]\s|\sat\s|@|\t)\s*")
+_SPLIT = re.compile(r"\s*(?:\||•|●|▪|·|,|\s[-–—/]\s|\sat\s|@|\t)\s*")
 # A job title names a role. Without one of these words (or an exact known title) a line is a
 # company, a location, a project or a sentence, not a title.
 ROLE_WORDS = re.compile(
@@ -177,7 +177,7 @@ def _best_title(candidates: list[str]) -> tuple[str | None, str | None, float]:
         cand = re.sub(r"^[\s●•▪*\-–]+", "", cand)
         cand = _RANGE.sub(" | ", _unglue(cand))  # drop the dates before splitting on dashes
         for part in _SPLIT.split(cand):
-            part = part.strip(" ()|")
+            part = re.sub(r"\s*\([^)]*\)?", "", part).strip(" ()|")  # "(Graduate RA)", "(Volunteer"
             if not part or not _title_like(part):
                 continue
             code, conf = ix.occupation(part)
