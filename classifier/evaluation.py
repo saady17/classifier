@@ -240,7 +240,7 @@ button:hover{{border-color:var(--accent)}} .last{{margin:12px 16px 0;padding:12p
 </body></html>"""
 
 
-MODELS = [("ai:gemini", "Gemini"), ("ai:deepseek", "DeepSeek"), ("ai:final", "Cross-checked final")]
+MODELS = [("ai:gemini", "Gemini"), ("ai:deepseek", "DeepSeek"), ("ai:glm", "GLM"), ("ai:final", "Final (majority / referee)")]
 
 
 def _model_view(db: sqlite3.Connection, rid: str, jid: str) -> dict[str, tuple[int, str]]:
@@ -288,7 +288,7 @@ th{{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut
 .ok{{color:#15803d}} .off{{color:#b91c1c}} @media (prefers-color-scheme:dark){{.ok{{color:#4ade80}} .off{{color:#f87171}}}}
 </style></head><body><main><p><a href="/eval?set=check">← Back to rating</a></p><h1>You vs the models</h1>
 <p class="muted">{who}: {n} jobs rated. <b class="ok">Green</b> = same score as you, <b class="off">red</b> = 2+ points apart.</p>
-<div class="cards">{cards}</div><div class="wrap"><table><tr><th>Job</th><th>You</th><th>Gemini</th><th>DeepSeek</th><th>Cross-checked final</th></tr>
+<div class="cards">{cards}</div><div class="wrap"><table><tr><th>Job</th><th>You</th><th>Gemini</th><th>DeepSeek</th><th>GLM</th><th>Final</th></tr>
 {rows}</table></div></main></body></html>"""
 
 
@@ -325,7 +325,7 @@ def mount(app, rater_dep) -> None:
             f"<div class='muted'>same score as you · {(st[2] / st[0] if st[0] else 0):.0%} within 1 point · {st[0]} jobs compared</div></div>"
             for (key, name), st in ((m, stats[m[0]]) for m in MODELS)
         )
-        return REVIEW.format(who=html.escape(who), n=len(rows), cards=cards, rows="".join(rows) or "<tr><td colspan=5>Nothing rated yet.</td></tr>")
+        return REVIEW.format(who=html.escape(who), n=len(rows), cards=cards, rows="".join(rows) or "<tr><td colspan=6>Nothing rated yet.</td></tr>")
 
     @app.get("/eval", response_class=HTMLResponse)
     def next_pair(field: str = "", set: str = "", who: str = Depends(rater_dep)):
