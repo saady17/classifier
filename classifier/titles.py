@@ -15,7 +15,7 @@ LEVELS = [
     (7, r"\b(chief [a-z]+ officer|ceo|cto|cfo|coo|cmo|cio|ciso|founder|co-founder)\b"),
     (6, r"\b(vp|vice president|svp|evp|head of)\b"),
     (5, r"\b(director|senior manager|sr\.? manager)\b"),
-    (4, r"\b(principal|lead|architect|distinguished|fellow)\b|\bstaff (\w+ )?(engineer|developer|scientist|designer|researcher|analyst)\b"),
+    (4, r"\b(principal|lead|architect|distinguished|fellow)\b|\bstaff (\w+ ){0,3}(engineer|developer|scientist|designer|researcher|analyst)\b"),
     (3, r"\b(senior|sr\.?|iii|level 3|l3|manager)\b"),
     (0, r"\b(intern|internship|co-?op|apprentice|trainee)\b"),
     (1, r"\b(junior|jr\.?|entry[- ]level|graduate|new grad|associate|assistant|i|level 1|l1)\b"),
