@@ -69,7 +69,7 @@ def _run(text: str, prefs: Prefs, limit: int) -> dict:
             "location": ", ".join(x for x in (resume.location_city, resume.location_region, resume.location_country) if x) or None,
             "top_skills": [s for s, _ in sorted(resume.skills.items(), key=lambda x: -x[1])[:20]],
         },
-        "matches": [asdict(m) for m in matches],
+        "matches": [{k: v for k, v in asdict(m).items() if k != "features"} for m in matches],
     }
 
 

@@ -26,7 +26,7 @@ def _one(rid: str) -> tuple[float, float, float] | None:
     db = store.connect()
     ranked = [m.job_id for m in rank(parse_resume(pool["text"]), Preferences(), limit=len(live), db=db, only=live, group=False)]
     top5_bad = sum(1 for j in ranked[:5] if rel[j] < 1) / 5
-    return ndcg_at(ranked, rel), precision_at(ranked, rel), top5_bad
+    return ndcg_at(ranked, rel, pool=live), precision_at(ranked, rel), top5_bad
 
 
 def main(split: str = "train") -> None:

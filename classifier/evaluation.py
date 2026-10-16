@@ -30,7 +30,7 @@ RESUMES_DIR = os.environ.get("RESUMES_DIR", "eval/resumes")
 # A whole folder can be pooled into one named split (e.g. "new" for a fresh holdout batch).
 FORCE_SPLIT = os.environ.get("POOL_SPLIT")
 PRIVATE = "eval/private"
-POOLS = f"{PRIVATE}/pools.json"
+POOLS = os.environ.get("EVAL_POOLS", f"{PRIVATE}/pools.json")
 RATINGS = f"{PRIVATE}/ratings.db"
 FROM_RANKER, FROM_KEYWORDS, FROM_RANDOM = 12, 8, 5
 
@@ -138,8 +138,11 @@ def _dcg(gains: list[float]) -> float:
     return sum((2**g - 1) / math.log2(i + 2) for i, g in enumerate(gains))
 
 
-def ndcg_at(ranked: list[str], rel: dict[str, float], k: int = 10) -> float:
-    ideal = _dcg(sorted(rel.values(), reverse=True)[:k])
+def ndcg_at(ranked: list[str], rel: dict[str, float], k: int = 10, pool: list[str] | None = None) -> float:
+    """NDCG against the best possible order of the jobs being ranked (`pool`, default `ranked`).
+    Labels for other jobs of the same resume (e.g. its live top 10) must not raise the bar."""
+    candidates = pool if pool is not None else ranked
+    ideal = _dcg(sorted((rel.get(j, 0.0) for j in candidates), reverse=True)[:k])
     return _dcg([rel.get(j, 0.0) for j in ranked[:k]]) / ideal if ideal else math.nan
 
 
@@ -193,7 +196,7 @@ def report() -> None:
         }
         for name, ranked in systems.items():
             r = results.setdefault(f"{pool['split']}:{name}", {"ndcg10": [], "p10": []})
-            r["ndcg10"].append(ndcg_at(ranked, rel))
+            r["ndcg10"].append(ndcg_at(ranked, rel, pool=live))
             r["p10"].append(precision_at(ranked, rel))
     if not results:
         print("No fully rated resumes yet.")

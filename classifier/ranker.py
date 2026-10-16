@@ -87,6 +87,7 @@ class Match:
     missing_required: list[str] = field(default_factory=list)
     matched_preferred: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    features: dict[str, float] = field(default_factory=dict, repr=False)  # inputs to the learned model
 
 
 def _skill_weights(db: sqlite3.Connection) -> dict[str, float]:
@@ -241,6 +242,20 @@ def level_fit(resume: ResumeProfile, job_level: int, min_years: float | None) ->
 
 
 @lru_cache(maxsize=1)
+def _model():
+    """The learned ranking model (classifier.model), unless missing or CLASSIFIER_MODEL=off."""
+    if os.environ.get("CLASSIFIER_MODEL", "on") == "off":
+        return None
+    import pickle
+
+    try:
+        with open(os.environ.get("CLASSIFIER_MODEL_PATH", "data/model.pkl"), "rb") as f:
+            return pickle.load(f)
+    except OSError:
+        return None
+
+
+@lru_cache(maxsize=1)
 def _tfidf():
     import pickle
 
@@ -320,6 +335,7 @@ def rank(
     db: sqlite3.Connection | None = None,
     only: list[str] | None = None,
     group: bool = True,
+    use_model: bool = True,
 ) -> list[Match]:
     """Top matches. `only` scores exactly these job ids (evaluation pools) instead of searching."""
     prefs = prefs or Preferences()
@@ -451,6 +467,48 @@ def rank(
                 score *= 0.55
             elif factors["title"] < 0.3:
                 score *= 0.8
+            soft = {n for n, sk in matcher().skills.items() if sk.category == "soft"}
+            req_hard = [k for k in job["required"] if k not in soft]
+            pref_hard = [k for k in job["preferred"] if k not in soft]
+            states = set(job.get("license_states") or [])
+            wanted_subjects = set(job.get("degree_subjects") or [])
+            feats = {
+                **{f"f_{k}": (math.nan if v is None else v) for k, v in factors.items()},
+                "rule_score": score,
+                "years": resume.years,
+                "min_years": job["min_years"] if job["min_years"] is not None else math.nan,
+                "years_gap": (job["min_years"] - resume.years) if job["min_years"] is not None else math.nan,
+                "pref_years_gap": (job["preferred_years"] - resume.years) if job.get("preferred_years") is not None else math.nan,
+                "level_resume": resume.level,
+                "level_job": row["job_level"],
+                "level_gap": row["job_level"] - resume.level,
+                "n_required": len(req_hard),
+                "n_req_matched": sum(1 for k in req_hard if _has(resume, k)),
+                "n_req_missing": sum(1 for k in req_hard if not _has(resume, k)),
+                "n_preferred": len(pref_hard),
+                "n_pref_matched": sum(1 for k in pref_hard if _has(resume, k)),
+                "missing_licenses": len(missing_licenses),
+                "license_mismatch": float(bool(states) and not (resume.license_states & states)),
+                "degree_job": job["degree"],
+                "degree_resume": resume.degree,
+                "degree_gap": job["degree"] - resume.degree if job["degree"] else math.nan,
+                "degree_required": float(job["degree_required"]),
+                "degree_equiv_ok": float(job["degree_equivalent_ok"]),
+                "subject_mismatch": float(bool(wanted_subjects) and bool(resume.degree_subjects) and not (wanted_subjects & resume.degree_subjects)),
+                "languages_missing": len(missing_lang),
+                "intern_job": float(bool(INTERN_TITLE.search(row["title"]))),
+                "is_student": float(resume.is_student),
+                "us_persons_only": float(bool(job.get("us_persons_only"))),
+                "same_occupation": float(bool(row["occupation"]) and row["occupation"] == resume.occupation),
+                "occupation_weight": resume.occupations.get(row["occupation"] or "", 0.0) / (sum(resume.occupations.values()) or 1.0),
+                "title_words": max((_title_words(base_title(row["title"]), base_title(r.title)) for r in resume.roles[:4]), default=0.0),
+                "structured": float(job["structured"]),
+                "n_resume_skills": len(resume.skills),
+                "remote": {"remote": 2.0, "hybrid": 1.0}.get(row["remote"], 0.0),
+            }
+            model = _model() if use_model else None
+            if model is not None:
+                score = float(min(3.0, max(0.0, model.predict([[feats.get(k, math.nan) for k in model.feature_names]])[0])) * 100 / 3)
             locs = json.loads(row["locations"])
             results.append(
                 Match(
@@ -458,6 +516,7 @@ def rank(
                     location="; ".join(loc["raw"] for loc in locs[:3]), remote=row["remote"], posted_at=row["posted_at"],
                     score=round(score, 1), factors={k: (None if isinstance(v, float) and math.isnan(v) else round(v, 3)) for k, v in factors.items()},
                     matched_required=hit[:10], missing_required=miss[:8], matched_preferred=phit[:6], notes=notes,
+                    features=feats,
                 )
             )
     results.sort(key=lambda m: -m.score)
