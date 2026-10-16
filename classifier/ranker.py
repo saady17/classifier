@@ -179,6 +179,32 @@ def _seniority(resume: ResumeProfile, job_level: int, min_years: float | None) -
     return 0.5 * level_score + 0.5 * years_score, notes
 
 
+ENTRY_JOB_LEVEL = 1
+INTERN_TITLE = re.compile(r"\b(intern|internship|co-?op|summer analyst|summer associate)\b", re.I)
+
+
+def level_fit(resume: ResumeProfile, job_level: int, min_years: float | None) -> float:
+    """Multiplier for how well the job's level and years fit the person: below 1 for a clear gap, a
+    small boost above 1 for an entry-level job that suits an early-career candidate."""
+    factor = 1.0
+    years = resume.years
+    if min_years:
+        gap = min_years - years
+        if gap > 1.0:
+            factor *= max(0.3, math.exp(-(gap - 1.0) / 2.5))
+    up = job_level - resume.level
+    if up >= 3:
+        factor *= 0.45
+    elif up == 2:
+        factor *= 0.65
+    early = years < 2.5 and resume.level <= 2
+    if early and job_level <= ENTRY_JOB_LEVEL and (not min_years or min_years <= years + 1):
+        factor *= 1.12  # an entry-level role is exactly what an early-career candidate should see first
+    if years >= 8 and job_level <= ENTRY_JOB_LEVEL:
+        factor *= 0.7  # very experienced people rarely want intern or entry-level jobs
+    return factor
+
+
 def _age_days(posted_at: str | None) -> float | None:
     if not posted_at:
         return None
@@ -334,6 +360,17 @@ def rank(
                 "visa": visa,
             }
             score = _combine(factors)
+            # Level and experience are the commonest reason a match is wrong (judges' #1 reason), so a
+            # clear gap scales the whole score rather than one factor.
+            fit = level_fit(resume, row["job_level"], job["min_years"])
+            if fit < 1.0:
+                score *= fit
+            elif fit > 1.0:
+                score = min(100.0, score * fit)
+            # Internships are for current students; graduates are usually ineligible (judges flagged this often).
+            if INTERN_TITLE.search(row["title"]) and not resume.is_student:
+                score *= 0.4
+                notes.append("internship for current students")
             # A required license or certification the resume lacks (NP, CPA, CDL...) is close to a dealbreaker.
             licenses = {n for n, sk in matcher().skills.items() if sk.category in ("license", "certification")}
             missing_licenses = [s for s in miss if s in licenses]

@@ -104,8 +104,15 @@ def sections(text: str) -> list[tuple[str, str]]:
     return out
 
 
+_NUMBER_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9,
+                 "ten": 10, "eleven": 11, "twelve": 12, "fifteen": 15}
+_NUMBER_WORD = re.compile(r"\b(" + "|".join(_NUMBER_WORDS) + r")\b(?=\s*(\(\d+\)\s*)?\+?\s*(-|to)?\s*\w*\s*(years?|yrs))", re.I)
+
+
 def _years(lines: list[str]) -> float | None:
     found = []
+    # "five years", "Three (3) years" -> digits, so one pattern handles both.
+    lines = [_NUMBER_WORD.sub(lambda m: str(_NUMBER_WORDS[m.group(1).lower()]), re.sub(r"\b(\w+) \((\d+)\)", r"\2", line)) for line in lines]
     for line in lines:
         for m in _YEARS.finditer(line):
             low = int(m.group(1))

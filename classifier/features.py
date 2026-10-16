@@ -38,8 +38,12 @@ CREATE TABLE IF NOT EXISTS skill_stats (
 """
 
 
+# Bump when the job reader's logic changes, so every stored job is read again.
+READER_VERSION = "2"
+
+
 def digest(row) -> str:
-    return hashlib.sha1(f"{row['title']}\n{row['company']}\n{row['description']}".encode()).hexdigest()
+    return hashlib.sha1(f"{READER_VERSION}\n{row['title']}\n{row['company']}\n{row['description']}".encode()).hexdigest()
 
 
 def compute(row: dict) -> tuple:

@@ -52,6 +52,7 @@ class ResumeProfile:
     location_country: str | None = None
     location_region: str | None = None
     location_city: str | None = None
+    is_student: bool = False  # still studying (expected graduation, current enrollment)
 
 
 def extract_text(data: bytes, filename: str) -> str:
@@ -135,7 +136,7 @@ _SPLIT = re.compile(r"\s*(?:\||•|●|▪|·|,|\s[-–—/]\s|\sat\s|@|\t)\s*")
 ROLE_WORDS = re.compile(
     r"\b(engineer|developer|programmer|architect|analyst|scientist|researcher|manager|director|head|lead|"
     r"officer|executive|president|vp|founder|co-founder|owner|partner|principal|consultant|advisor|adviser|"
-    r"specialist|coordinator|associate|assistant|administrator|admin|representative|rep|agent|clerk|"
+    r"specialist|coordinator|associate|assistant|administrator|admin|representative|rep|clerk|"
     r"technician|technologist|tech|designer|artist|writer|editor|producer|strategist|marketer|recruiter|"
     r"accountant|auditor|controller|bookkeeper|nurse|rn|lpn|np|physician|doctor|therapist|pharmacist|"
     r"counselor|teacher|tutor|instructor|professor|lecturer|educator|ta|intern|internship|trainee|apprentice|"
@@ -220,16 +221,25 @@ def parse_resume(text: str) -> ResumeProfile:
         main = max(profile.occupations, key=profile.occupations.get) if profile.occupations else None
         current = next((r for r in profile.roles if r.occupation == main), profile.roles[0])
         profile.current_title, profile.occupation, profile.level = current.title, current.occupation, current.level
-        if profile.level == 2 and profile.years >= 7:
-            profile.level = 3  # long experience without a level word in the title
-        if profile.years < 1.5 and profile.level >= 2:
-            profile.level = 1
+        # Years say more about level than a title without a level word does.
+        if profile.years < 2.5:
+            profile.level = min(profile.level, 1)
+        elif profile.years < 5:
+            profile.level = min(profile.level, 2)
+        elif profile.years >= 8:
+            profile.level = max(profile.level, 3)
     else:
         # No dated roles: fall back to a title-like line in the header.
         title, code, conf = _best_title([line for sec, line in lines[:12] if sec in ("header", "summary")])
         if title and conf >= 0.85:
             profile.current_title, profile.occupation = title, code
             profile.occupations = {code: 1.0}
+
+    # Still a student? An expected graduation, "pursuing", or a degree whose end date is in the future.
+    edu_text = "\n".join(line for sec, line in lines if sec == "education") or ""
+    this_year = date.today().year
+    future = [int(y) for y in re.findall(r"\b(20\d\d)\b", edu_text) if int(y) > this_year or (int(y) == this_year and date.today().month < 6)]
+    profile.is_student = bool(re.search(r"\b(expected|anticipated|pursuing|candidate for|in progress|current student)\b", edu_text, re.I) or future)
 
     # Highest degree, from the education section when there is one.
     edu = "\n".join(line for sec, line in lines if sec == "education") or text
