@@ -16,6 +16,12 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
 
 from classifier import store
+from classifier.filters import (
+    EMPLOYMENT_TYPES,
+    LABEL_ORDER,
+    SENIORITY_LEVELS,
+    WORK_MODES,
+)
 from classifier.ranker import Preferences, rank
 from classifier.resume import extract_text, parse_resume
 from classifier.titles import index as title_index
@@ -31,12 +37,25 @@ def require_key(x_api_key: str | None = Header(default=None)) -> None:
 
 
 class Prefs(BaseModel):
+    """Who the person is (facts) and what they are looking for (recruiter-style hard filters)."""
+
     countries: list[str] | None = None  # default: the resume's own country, else US/UK/CA
-    remote: str = "any"  # any | remote_only | no_remote
-    needs_sponsorship: bool = False
+    remote: str = "any"  # legacy: any | remote_only | no_remote (prefer work_modes)
+    needs_sponsorship: bool = False  # hard check against US Department of Labor H-1B data
     has_clearance: bool = False
     willing_to_relocate: bool = True
     work_authorization: str = "unknown"  # citizen | permanent_resident | needs_sponsorship | unknown
+    employment_types: list[str] = []  # full_time, part_time, contract, temporary, internship
+    work_modes: list[str] = []  # remote, hybrid, onsite
+    locations: list[str] = []  # "Austin, TX", "New York", "Ontario", "UK"
+    excluded_employers: list[str] = []
+    only_employers: list[str] = []
+    title_include: list[str] = []
+    title_exclude: list[str] = []
+    seniority: list[str] = []  # intern, entry, mid, senior, lead, director, executive, or "auto"
+    min_salary: float | None = None  # annual, in the job's currency
+    include_unlisted_salary: bool = True
+    min_label: str | None = None  # "Excellent match" | "Good match" | "Possible match"
 
 
 class TextRequest(BaseModel):
@@ -52,11 +71,23 @@ def _run(text: str, prefs: Prefs, limit: int) -> dict:
     countries = tuple(c.upper() for c in prefs.countries) if prefs.countries else (
         (resume.location_country,) if resume.location_country else ("US", "GB", "CA")
     )
+    for name, values, allowed in (("employment_types", prefs.employment_types, EMPLOYMENT_TYPES),
+                                  ("work_modes", prefs.work_modes, WORK_MODES),
+                                  ("seniority", prefs.seniority, (*SENIORITY_LEVELS, "auto"))):
+        bad = [v for v in values if v not in allowed]
+        if bad:
+            raise HTTPException(422, f"Unknown {name}: {', '.join(bad)}. Allowed: {', '.join(allowed)}.")
+    if prefs.min_label and prefs.min_label not in LABEL_ORDER:
+        raise HTTPException(422, f"min_label must be one of: {', '.join(LABEL_ORDER[1:])}.")
     p = Preferences(
         countries=countries, remote=prefs.remote, needs_sponsorship=prefs.needs_sponsorship,
         has_clearance=prefs.has_clearance, willing_to_relocate=prefs.willing_to_relocate,
         work_authorization=prefs.work_authorization,
         city=resume.location_city, region=resume.location_region,
+        employment_types=tuple(prefs.employment_types), work_modes=tuple(prefs.work_modes), locations=tuple(prefs.locations),
+        excluded_employers=tuple(prefs.excluded_employers), only_employers=tuple(prefs.only_employers),
+        title_include=tuple(prefs.title_include), title_exclude=tuple(prefs.title_exclude), seniority=tuple(prefs.seniority),
+        min_salary=prefs.min_salary, include_unlisted_salary=prefs.include_unlisted_salary, min_label=prefs.min_label,
     )
     matches = rank(resume, p, limit=max(1, min(limit, 100)))
     return {
@@ -84,17 +115,26 @@ def health() -> dict:
 @app.post("/v1/rank", dependencies=[Depends(require_key)])
 async def rank_file(
     file: UploadFile = File(...),
-    needs_sponsorship: bool = Form(False),
-    remote: str = Form("any"),
-    countries: str = Form(""),
+    preferences: str = Form("{}"),  # JSON object with the same fields as Prefs
     limit: int = Form(30),
 ) -> dict:
     data = await file.read()
     if len(data) > MAX_RESUME_BYTES:
         raise HTTPException(413, "Resume files must be under 5 MB.")
+    try:
+        prefs = Prefs.model_validate_json(preferences or "{}")
+    except ValueError as exc:
+        raise HTTPException(422, f"preferences is not valid: {exc}") from exc
     text = extract_text(data, file.filename or "resume.pdf")
-    prefs = Prefs(needs_sponsorship=needs_sponsorship, remote=remote, countries=[c for c in countries.split(",") if c] or None)
     return _run(text, prefs, limit)
+
+
+@app.get("/v1/filters")
+def filter_options() -> dict:
+    """The allowed values for each filter, for building a search form."""
+    return {"employment_types": list(EMPLOYMENT_TYPES), "work_modes": list(WORK_MODES),
+            "seniority": [*SENIORITY_LEVELS, "auto"], "min_label": LABEL_ORDER[1:],
+            "work_authorization": ["citizen", "permanent_resident", "needs_sponsorship", "unknown"]}
 
 
 @app.post("/v1/rank-text", dependencies=[Depends(require_key)])

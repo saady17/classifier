@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import re
 import sqlite3
 import time
@@ -18,6 +19,7 @@ from dataclasses import asdict
 import numpy as np
 
 from classifier import store
+from classifier.filters import employment_type, salary_from_text
 from classifier.jobparse import parse_job
 from classifier.skills import matcher
 from classifier.titles import index as title_index
@@ -42,7 +44,7 @@ CREATE TABLE IF NOT EXISTS skill_stats (
 
 
 # Bump when the job reader's logic changes, so every stored job is read again.
-READER_VERSION = "7"
+READER_VERSION = "8"
 
 
 def digest(row) -> str:
@@ -65,6 +67,13 @@ def compute(row: dict) -> tuple:
     code, conf = title_index().occupation(row["title"])
     data = asdict(job)
     data["english"] = english_share(row["description"]) >= 0.12  # English posts sit around 0.2-0.3
+    # Employment type and pay, for the recruiter filters (feed fields first, then the post's text).
+    data["employment_type"] = employment_type(row.get("employment_type"), row["title"], row["description"])
+    if row.get("salary_min") or row.get("salary_max"):
+        data.update(salary_min=row.get("salary_min"), salary_max=row.get("salary_max"),
+                    salary_currency=row.get("salary_currency"), salary_period=row.get("salary_period") or "year")
+    elif pay := salary_from_text(row["description"]):
+        data.update(salary_min=pay[0], salary_max=pay[1], salary_currency=pay[2], salary_period=pay[3])
     return (row["id"], row["hash"], code, conf, title_level(row["title"]), json.dumps(data))
 
 
@@ -73,13 +82,14 @@ def run() -> None:
     db.executescript(SCHEMA)
     known = dict(db.execute("SELECT id, desc_hash FROM job_features").fetchall())
     todo = []
-    for row in db.execute("SELECT id, company, title, description FROM jobs"):
+    for row in db.execute("SELECT id, company, title, description, employment_type, salary_min, salary_max, salary_currency, salary_period FROM jobs"):
         h = digest(row)
         if known.get(row["id"]) != h:
-            todo.append({"id": row["id"], "company": row["company"], "title": row["title"], "description": row["description"], "hash": h})
+            todo.append({**dict(row), "hash": h})
     started = time.monotonic()
     if todo:
-        with ProcessPoolExecutor(max_workers=2) as pool:
+        # One worker by default: two copies of the dictionaries plus TF-IDF ran this 8 GB server out of memory.
+        with ProcessPoolExecutor(max_workers=int(os.environ.get("FEATURE_WORKERS", "1"))) as pool:
             for n, result in enumerate(pool.map(compute, todo, chunksize=64), 1):
                 db.execute("INSERT OR REPLACE INTO job_features VALUES (?,?,?,?,?,?)", result)
                 if n % 2000 == 0:

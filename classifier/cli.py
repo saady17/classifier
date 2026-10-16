@@ -19,7 +19,7 @@ def main(argv: list[str]) -> None:
     print(f"Resume: {resume.current_title} ({index().name(resume.occupation)}), level {resume.level}, {resume.years:g} yrs, "
           f"degree {resume.degree}, {resume.location_city or '?'}, {resume.location_region or '?'}")
     for i, m in enumerate(rank(resume, prefs, limit=int(next((a.split('=')[1] for a in argv if a.startswith('--top=')), 15))), 1):
-        print(f"{i:2}. {m.score:5.1f}  {m.title} — {m.company} [{m.location[:40]}] {m.remote}")
+        print(f"{i:2}. {m.score:5.1f} {m.label:15} {m.title} — {m.company} [{m.location[:40]}] {m.remote}")
         print(f"      matched: {', '.join(m.matched_required[:7])}" + (f" | missing: {', '.join(m.missing_required[:5])}" if m.missing_required else ""))
         f = m.factors
         print("      " + " ".join(f"{k[:6]}={v:.2f}" for k, v in f.items() if v is not None) + (f" | {'; '.join(m.notes)}" if m.notes else ""))

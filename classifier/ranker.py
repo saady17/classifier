@@ -15,7 +15,7 @@ from functools import lru_cache
 
 from rapidfuzz import fuzz
 
-from classifier import h1b, store
+from classifier import filters, h1b, store
 from classifier.credentials import GROUP
 from classifier.resume import ResumeProfile
 from classifier.skills import matcher
@@ -70,6 +70,18 @@ class Preferences:
     willing_to_relocate: bool = True
     # citizen | permanent_resident | needs_sponsorship | unknown. Never guessed from the resume.
     work_authorization: str = "unknown"
+    # Recruiter-style hard filters (classifier.filters). Empty means "any".
+    employment_types: tuple[str, ...] = ()  # full_time, part_time, contract, temporary, internship
+    work_modes: tuple[str, ...] = ()  # remote, hybrid, onsite
+    locations: tuple[str, ...] = ()  # "Austin, TX", "New York", "Ontario", "UK"
+    excluded_employers: tuple[str, ...] = ()
+    only_employers: tuple[str, ...] = ()
+    title_include: tuple[str, ...] = ()
+    title_exclude: tuple[str, ...] = ()
+    seniority: tuple[str, ...] = ()  # intern, entry, mid, senior, lead, director, executive, or "auto"
+    min_salary: float | None = None  # annual, in the job's currency
+    include_unlisted_salary: bool = True
+    min_label: str | None = None  # "Excellent match" | "Good match" | "Possible match"
 
 
 @dataclass
@@ -88,6 +100,9 @@ class Match:
     matched_preferred: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     features: dict[str, float] = field(default_factory=dict, repr=False)  # inputs to the learned model
+    label: str = ""  # Excellent match | Good match | Possible match | Stretch (see classifier.calibrate)
+    employment_type: str = "full_time"
+    salary: str | None = None  # e.g. "USD 120,000-150,000 per year", when the post states it
 
 
 def _skill_weights(db: sqlite3.Connection) -> dict[str, float]:
@@ -215,6 +230,14 @@ def credential_fit(resume: ResumeProfile, job: dict, notes: list[str]) -> float:
     return factor
 
 
+def _salary_text(job: dict) -> str | None:
+    lo, hi = job.get("salary_min"), job.get("salary_max")
+    if not lo and not hi:
+        return None
+    rng = f"{lo:,.0f}-{hi:,.0f}" if lo and hi and lo != hi else f"{(lo or hi):,.0f}"
+    return f"{job.get('salary_currency') or ''} {rng} per {job.get('salary_period') or 'year'}".strip()
+
+
 ENTRY_JOB_LEVEL = 1
 INTERN_TITLE = re.compile(r"\b(intern|internship|co-?op|summer analyst|summer associate)\b", re.I)
 
@@ -239,6 +262,24 @@ def level_fit(resume: ResumeProfile, job_level: int, min_years: float | None) ->
     if years >= 8 and job_level <= ENTRY_JOB_LEVEL:
         factor *= 0.7  # very experienced people rarely want intern or entry-level jobs
     return factor
+
+
+@lru_cache(maxsize=1)
+def _label_thresholds() -> list[tuple[float, str]]:
+    """Score thresholds measured by classifier.calibrate (data/labels.json); strictest first."""
+    try:
+        cal = json.load(open(os.environ.get("CLASSIFIER_LABELS", "data/labels.json")))
+    except (OSError, ValueError):
+        cal = {}
+    names = (("excellent", "Excellent match"), ("good", "Good match"), ("possible", "Possible match"))
+    return [(float(cal[k]["min_score"]), label) for k, label in names if cal.get(k)]
+
+
+def match_label(score: float) -> str:
+    for threshold, label in _label_thresholds():
+        if score >= threshold:
+            return label
+    return "Stretch"
 
 
 @lru_cache(maxsize=1)
@@ -451,6 +492,8 @@ def rank(
                 continue
             if not job.get("english", True):
                 continue  # Jobzhub's markets are English-speaking; a German-language post is not a match
+            if filters.check(row, job, prefs, resume) is not None:
+                continue
             req, hit, miss = _coverage(job["required"], resume, weights)
             pref, phit, _ = _coverage(job["preferred"], resume, weights)
             all_skills = set(job["required"]) | set(job["preferred"]) | set(job["duties"])
@@ -564,9 +607,15 @@ def rank(
                     score=round(score, 1), factors={k: (None if isinstance(v, float) and math.isnan(v) else round(v, 3)) for k, v in factors.items()},
                     matched_required=hit[:10], missing_required=miss[:8], matched_preferred=phit[:6], notes=notes,
                     features=feats,
+                    employment_type=job.get("employment_type") or "full_time",
+                    salary=_salary_text(job),
                 )
             )
     results.sort(key=lambda m: -m.score)
+    for m in results:
+        m.label = match_label(m.score)
+    if prefs.min_label:
+        results = [m for m in results if filters.LABEL_ORDER.index(m.label) >= filters.LABEL_ORDER.index(prefs.min_label)]
     if not group:
         return results[:limit]
     # The same role posted in several cities: keep the best-scoring posting, note the others.

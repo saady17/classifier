@@ -1,85 +1,70 @@
 # classifier
 
-Ranks jobs from official public job feeds against a resume, **without AI models**: no LLMs, no neural
-networks, no AI APIs. Matching uses text rules, a skills and job-title dictionary (O*NET, ESCO) and
-classic statistics (BM25, and simple models that learn feature weights from human ratings).
+Ranks jobs from official public job feeds against a resume, **without AI models at run time**: no
+LLMs, no neural networks, no AI APIs. It reads the resume, applies the hard filters a recruiter or job
+seeker would set (employment type, remote/hybrid/on-site, location, excluded employers, seniority,
+salary, visa...), then scores every remaining job with rules, a skills and job-title dictionary
+(O*NET, hand-curated) and classic statistics (BM25, TF-IDF and gradient-boosted decision trees
+learned from ratings). Each match gets a 0–100 score, a calibrated label and a plain explanation.
 
-Markets: US, UK and Canada. Planned to merge into app.jobzhub.com.
+Markets: US, UK and Canada. Built to be merged into app.jobzhub.com behind an HTTP API.
+
+## Where it stands (held-out resumes, never used for tuning)
+
+| | Result |
+|---|---|
+| "Good match" label is right (a good fit per a 3-judge majority) | **90.3%** of jobs scoring 82+ |
+| "Possible match" label is at least a reasonable fit | 90.2% of jobs scoring 41+ |
+| Top-5 jobs that are good fits (searching all ~29k jobs) | 62% (test set), 40% (fresh batch) |
+| NDCG@10 vs keyword search (25-job pools) | 0.746 vs 0.455 (test), 0.705 vs 0.364 (fresh batch) |
+
+Details, method and caveats: [docs/EVALUATION.md](docs/EVALUATION.md).
+
+## Quick start
+
+```sh
+docker build -t classifier-dev .
+alias run='docker run --rm -m 5g --env-file .env -v $PWD:/app -w /app classifier-dev'
+
+run python -m classifier.ingest          # fetch jobs from data/sources.yaml (nightly by cron)
+run python -m classifier.features        # read new/changed jobs once; skill rarity; TF-IDF
+run python -m classifier.cli resume.pdf --top=20 [--sponsor] [--remote]
+run uvicorn classifier.api:app --host 0.0.0.0 --port 8000
+run python -m pytest -q                  # 57 regression tests
+```
+
+## Documentation
+
+| Doc | What's in it |
+|---|---|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Pipeline, modules, data, how a match is scored |
+| [docs/API.md](docs/API.md) | Endpoints, every filter, labels, response format |
+| [docs/EVALUATION.md](docs/EVALUATION.md) | AI judges as exam markers, splits, metrics, results history, known limits |
+| [docs/OPERATIONS.md](docs/OPERATIONS.md) | Refresh, H-1B data, keys, memory, retraining, adding employers |
+| [docs/LLM_GUIDE.md](docs/LLM_GUIDE.md) | Recommendations for using LLMs to build classifiers like this one |
+| [AGENTS.md](AGENTS.md) | Rules for coding agents working in this repo |
 
 ## Job sources (official feeds only, no scraping)
 
 | Source | Feed | Key needed |
 |---|---|---|
-| Greenhouse | Job Board API | no |
-| Lever | Postings API | no |
-| Ashby | Public job posting API | no |
-| SmartRecruiters | Posting API | no |
+| Greenhouse (230 employers) | Job Board API | no |
+| Lever (33) | Postings API | no |
+| Ashby (102) | Public job posting API | no |
+| SmartRecruiters (24) | Posting API | no |
 | Workable | Careers widget API | no |
 | Remotive | Remote jobs API (link back to Remotive) | no |
-| USAJOBS | Search API | `USAJOBS_API_KEY`, `USAJOBS_EMAIL` |
-| Adzuna | Search API (snippets only) | `ADZUNA_APP_ID`, `ADZUNA_APP_KEY` |
+| USAJOBS | Search API | `USAJOBS_API_KEY`, `USAJOBS_EMAIL` (not yet set) |
+| Adzuna | Search API (snippets only) | `ADZUNA_APP_ID`, `ADZUNA_APP_KEY` (not yet set) |
 
-Companies are listed in `data/sources.yaml`. To add some, put candidate IDs in `data/candidates.yaml`,
-run `python -m classifier.discover`, and check new matches really are the intended company.
+LinkedIn, Indeed, Glassdoor and similar sites are deliberately **not** scraped.
 
-## Run
-
-```sh
-docker build -t classifier-dev .
-docker run --rm -v $PWD:/app -w /app classifier-dev python -m classifier.ingest   # fetch + store
-```
-
-Jobs are stored in `data/jobs.db` (SQLite with an FTS5 index), refreshed per account: closed jobs are
-removed and duplicates across sources are linked.
-
-## Pipeline
-
-```sh
-python -m classifier.ingest            # fetch jobs from data/sources.yaml (daily)
-python -m classifier.features          # read each new/changed job once; skill rarity table
-python -m classifier.build_taxonomy    # only after editing data/taxonomy/curated_*.txt or an O*NET update
-python -m classifier.cli resume.pdf    # rank from the command line (--sponsor, --remote, --top=20)
-python -m pytest -q                    # regression tests
-```
-
-## How ranking works
-
-1. **Resume** (`resume.py`): text from PDF/DOCX, sections, dated roles mapped to O*NET occupations,
-   merged years of experience, seniority, highest degree, location, skills weighted by where they appear.
-2. **Job posts** (`jobparse.py`, precomputed by `features.py`): required vs preferred skills, years,
-   minimum degree, visa sponsorship, clearance; benefits/EEO/pay boilerplate ignored.
-3. **Skills dictionary** (`data/taxonomy/`): 352 hand-curated skills with aliases across many fields plus
-   about 7,000 O*NET products, with rules against everyday-word false matches.
-4. **Ranking** (`ranker.py`): candidates from keyword search (SQLite FTS5 BM25) plus same/related
-   occupations; ten factor scores combined into 0–100 with an explanation; hard filters for country,
-   remote preference, no-sponsorship and clearance.
-
-## API
-
-`uvicorn classifier.api:app` — set `CLASSIFIER_API_KEY` and send it as `X-API-Key`.
-
-- `POST /v1/rank` — multipart: `file` (PDF/DOCX/TXT), optional `needs_sponsorship`, `remote`
-  (`any`/`remote_only`/`no_remote`), `countries` (`US,CA`), `limit`.
-- `POST /v1/rank-text` — JSON: `{"resume_text": "...", "preferences": {...}, "limit": 30}`.
-- `GET /health` — job count and last fetch.
-
-Each match has `score` (0–100), `factors`, `matched_required`, `missing_required`, `matched_preferred`
-and `notes` (e.g. "asks for 5+ years; you have about 3").
-
-## Evaluation (is it actually good?)
-
-1. Put resumes in `eval/resumes/` (git-ignored; personal data never leaves the server).
-2. `python -m classifier.evaluation pools` — for each resume, 25 jobs: the ranker's top 12, keyword
-   search's top 8, 5 random same-country jobs, shuffled so raters can't tell which system chose them.
-   A fixed third of resumes is the **test** set and never used for tuning.
-3. Raters open `/eval` (set `RATER_PASSWORD`; the user name is the rater's name) and score each job
-   0–3 (keys 0–3 work).
-4. `python -m classifier.tune` — learns factor weights from the **train** resumes (`data/weights.json`).
-5. `python -m classifier.evaluation report` — NDCG@10 and P@10 for the ranker vs keyword search vs
-   random, on train and test. The test numbers are the honest ones.
-
-## Data
+## Data and privacy
 
 O*NET® 31.0 Database by the U.S. Department of Labor, Employment and Training Administration
-(USDOL/ETA), used under the CC BY 4.0 license. O*NET® is a trademark of USDOL/ETA.
-Real resumes used for evaluation stay on the server (`eval/resumes/`, git-ignored) and are never committed.
+(USDOL/ETA), used under the CC BY 4.0 license. O*NET® is a trademark of USDOL/ETA. H-1B sponsorship
+uses the Department of Labor's public LCA disclosure data.
+
+Real resumes, rating pools and ratings (`eval/resumes*/`, `eval/private/`) are personal data: they stay
+on the server, are git-ignored and are never committed. Resumes are redacted (name, email, phone, links,
+street address) before any text is sent to an AI judge during evaluation.

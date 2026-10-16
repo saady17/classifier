@@ -111,7 +111,8 @@ def parse_location(raw: str) -> Location:
 
     if loc.country is None and _FOREIGN.search(low):
         loc.country = None
-    if loc.city is None and parts and lowparts[0] not in ("remote", "hybrid", "anywhere") and loc.country:
+    first_is_area = lowparts[0] in _REGION_NAME or parts[0] in _REGION_ABBR or lowparts[0] in UK_NATIONS if parts else False
+    if loc.city is None and parts and lowparts[0] not in ("remote", "hybrid", "anywhere") and loc.country and not first_is_area:
         first = parts[0]
         if first.lower() not in sum(COUNTRY_WORDS.values(), []) and not (first.isupper() and len(first) <= 3):
             loc.city = first

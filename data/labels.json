@@ -1,0 +1,18 @@
+{
+  "excellent": null,
+  "good": {
+    "min_score": 82,
+    "precision": 0.903,
+    "jobs": 154
+  },
+  "possible": {
+    "min_score": 41,
+    "precision": 0.902,
+    "jobs": 1705
+  },
+  "measured_on": [
+    "new",
+    "test"
+  ],
+  "pairs": 4610
+}

@@ -171,3 +171,52 @@ def test_bare_years_and_languages():
                     "About us\nFounded 10 years ago, we serve Spanish-speaking customers.")
     assert job.min_years == 5 and job.languages == ["german"]
     assert parse_job("Requirements:\n- Korean-English bilingual (written and spoken)").languages == ["korean"]
+
+
+@pytest.mark.parametrize("feed,title,text,expected", [
+    ("Full-time", "Data Analyst", "", "full_time"),
+    (None, "Software Engineering Intern (Summer 2027)", "", "internship"),
+    (None, "Part-Time Barista", "", "part_time"),
+    (None, "Data Engineer", "This is a 6-month contract role.", "contract"),
+    ("FullTime", "Senior Accountant", "", "full_time"),
+    (None, "Registered Nurse - Per Diem", "", "temporary"),
+    (None, "Product Manager", "We build things.", "full_time"),
+])
+def test_employment_type(feed, title, text, expected):
+    from classifier.filters import employment_type
+
+    assert employment_type(feed, title, text) == expected
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("The base salary range is $120,000 - $150,000 per year.", (120000, 150000, "USD", "year")),
+    ("Pay: $25 - $32 per hour", (25, 32, "USD", "hour")),
+    ("£45k–£55k", (45000, 55000, "GBP", "year")),
+    ("We raised $5 - $10 million", None),
+])
+def test_salary_from_text(text, expected):
+    from classifier.filters import salary_from_text
+
+    got = salary_from_text(text)
+    assert (got and tuple(round(x) if isinstance(x, float) else x for x in got)) == expected or got == expected
+
+
+def test_recruiter_filters():
+    from classifier.filters import check
+    from classifier.ranker import Preferences
+
+    resume = parse_resume(open("tests/fixtures/resume_swe.txt").read())
+    row = {"remote": "onsite", "locations": '[{"raw": "Austin, TX", "city": "Austin", "region": "TX", "country": "US"}]',
+           "company": "Acme Corp", "title": "Senior Software Engineer", "job_level": 3}
+    data = {"employment_type": "full_time", "salary_min": 150000, "salary_max": 180000, "salary_period": "year"}
+    assert check(row, data, Preferences(), resume) is None
+    assert check(row, data, Preferences(employment_types=("contract",)), resume) == "employment type"
+    assert check(row, data, Preferences(work_modes=("remote",)), resume) == "work mode"
+    assert check(row, data, Preferences(locations=("Seattle, WA",)), resume) == "location"
+    assert check(row, data, Preferences(locations=("Texas",)), resume) is None
+    assert check(row, data, Preferences(excluded_employers=("ACME CORPORATION",)), resume) == "excluded employer"
+    assert check(row, data, Preferences(title_exclude=("senior",)), resume) == "excluded title keyword"
+    assert check(row, data, Preferences(seniority=("entry",)), resume) == "seniority"
+    assert check(row, data, Preferences(seniority=("auto",)), resume) is None  # resume is senior (level 3)
+    assert check(row, data, Preferences(min_salary=200000), resume) == "salary"
+    assert check(row, {"employment_type": "full_time"}, Preferences(min_salary=100000, include_unlisted_salary=False), resume) == "salary not stated"
