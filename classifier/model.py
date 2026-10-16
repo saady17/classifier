@@ -18,10 +18,22 @@ from sklearn.ensemble import HistGradientBoostingRegressor
 
 from classifier import store
 from classifier.evaluation import PRIVATE, _load_pools, averaged_ratings, ndcg_at
+from classifier.modelwrap import GoodFitModel
 from classifier.ranker import Preferences, rank
 from classifier.resume import parse_resume
 
 OUT = "data/model.pkl"
+OBJECTIVE = os.environ.get("MODEL_OBJECTIVE", "regression")  # regression (0-3 rating) | good (P(rating >= 2))
+
+
+def _fit(X, y, names):
+    if OBJECTIVE == "good":
+        from sklearn.ensemble import HistGradientBoostingClassifier
+
+        return GoodFitModel(HistGradientBoostingClassifier(**PARAMS).fit(X, (y >= 1.75).astype(int)), names)
+    m = HistGradientBoostingRegressor(**PARAMS).fit(X, y)
+    m.feature_names = names
+    return m
 PARAMS = dict(learning_rate=0.05, max_iter=350, max_leaf_nodes=24, min_samples_leaf=40, l2_regularization=1.0, random_state=7)
 _POOLS: dict = {}
 _LABELS: dict = {}
@@ -43,8 +55,10 @@ def collect(split: str) -> dict[str, list]:
     pools = _load_pools()
     live_path = f"{PRIVATE}/live.json"
     live = json.load(open(live_path)) if os.path.exists(live_path) else {}
-    _POOLS = {rid: {"text": p["text"], "ids": p["order"] + live.get(rid, {}).get("order", [])} for rid, p in pools.items() if p["split"] == split}
     _LABELS = averaged_ratings()
+    # Every rated job for the resume: its pool, its current live top 10 and earlier top-10 lists.
+    _POOLS = {rid: {"text": p["text"], "ids": p["order"] + live.get(rid, {}).get("order", []) + list(_LABELS.get(rid, {}))}
+              for rid, p in pools.items() if p["split"] == split}
     with ProcessPoolExecutor(max_workers=2) as ex:
         return {rid: rows for rid, rows in ex.map(_rows, list(_POOLS)) if rows}
 
@@ -58,15 +72,17 @@ def _matrix(groups: dict[str, list], names: list[str]):
     return np.array(X, dtype=float), np.array(y, dtype=float)
 
 
-def _ndcg(model, groups, names) -> float:
-    vals = []
+def _scores(model, groups, names) -> tuple[float, float]:
+    """(NDCG@10, share of the top 5 that are good) averaged over resumes."""
+    vals, good5 = [], []
     for rows in groups.values():
         preds = model.predict(np.array([[f.get(k, math.nan) for k in names] for f, _, _ in rows], dtype=float))
-        ranked = [jid for _, (_, _, jid) in sorted(zip(preds, rows), key=lambda t: -t[0])]
-        v = ndcg_at(ranked, {jid: lab for _, lab, jid in rows})
+        order = [row for _, row in sorted(zip(preds, rows), key=lambda t: -t[0])]
+        v = ndcg_at([jid for _, _, jid in order], {jid: lab for _, lab, jid in rows})
         if not math.isnan(v):
             vals.append(v)
-    return sum(vals) / len(vals)
+        good5.append(sum(lab >= 2 for _, lab, _ in order[:5]) / min(5, len(order)))
+    return sum(vals) / len(vals), sum(good5) / len(good5)
 
 
 def main() -> None:
@@ -81,17 +97,19 @@ def main() -> None:
         tr = {r: groups[r] for r in rids if r not in hold}
         te = {r: groups[r] for r in hold}
         X, y = _matrix(tr, names)
-        m = HistGradientBoostingRegressor(**PARAMS).fit(X, y)
-        scores.append(_ndcg(m, te, names))
+        m = _fit(X, y, names)
+        scores.append(_scores(m, te, names))
         # the rule-based score on the same held-out fold, for comparison
         bv = [ndcg_at([j for f, _, j in sorted(rows, key=lambda t: -t[0]["rule_score"])], {j: lab for _, lab, j in rows}) for rows in te.values()]
         bv = [v for v in bv if not math.isnan(v)]
         base.append(sum(bv) / len(bv))
-    print(f"4-fold CV on {len(groups)} train resumes ({sum(len(v) for v in groups.values())} rated pairs): "
-          f"model NDCG@10 {np.mean(scores):.3f} vs rule score {np.mean(base):.3f}")
+    print(f"4-fold CV ({OBJECTIVE}) on {len(groups)} train resumes ({sum(len(v) for v in groups.values())} rated pairs): "
+          f"model NDCG@10 {np.mean([s[0] for s in scores]):.3f}, top-5 good {np.mean([s[1] for s in scores]):.0%} "
+          f"vs rule score NDCG {np.mean(base):.3f}")
+    if os.environ.get("CV_ONLY"):
+        return
     X, y = _matrix(groups, names)
-    model = HistGradientBoostingRegressor(**PARAMS).fit(X, y)
-    model.feature_names = names
+    model = _fit(X, y, names)
     with open(OUT, "wb") as f:
         pickle.dump(model, f)
     print(f"saved {OUT} ({len(names)} features)")
