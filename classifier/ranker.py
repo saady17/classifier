@@ -42,13 +42,18 @@ HAND_WEIGHTS = {
 }
 
 
+# The judges were told to ignore location and were not asked about posting age or visa, so ratings
+# say nothing about these; they keep their hand-set weights (they matter to job seekers).
+NOT_LEARNED = ("location", "freshness", "visa")
+
+
 def _load_weights() -> dict[str, float]:
     """Weights learned from ratings (classifier.tune) when available, otherwise the hand-set ones."""
     try:
         learned = json.load(open(os.environ.get("CLASSIFIER_WEIGHTS", "data/weights.json")))
-        return {k: float(learned.get(k, v)) for k, v in HAND_WEIGHTS.items()}
     except (OSError, ValueError):
         return dict(HAND_WEIGHTS)
+    return {k: (v if k in NOT_LEARNED else float(learned.get(k, v))) for k, v in HAND_WEIGHTS.items()}
 
 
 WEIGHTS = _load_weights()
