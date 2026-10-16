@@ -168,7 +168,8 @@ def averaged_ratings(raters: str | None = None) -> dict[str, dict[str, float]]:
             human.setdefault((rid, jid), []).append(r)
     labels: dict[tuple[str, str], float] = {}
     if raters in ("ai", "all"):
-        labels.update({k: sum(v) / len(v) for k, v in judges.items()})
+        # Three or more judges: the median (majority) is far less noisy than the mean of two.
+        labels.update({k: (sorted(v)[len(v) // 2] if len(v) >= 3 else sum(v) / len(v)) for k, v in judges.items()})
         labels.update({k: float(v) for k, v in final.items()})
     if raters in ("human", "all"):
         labels.update({k: sum(v) / len(v) for k, v in human.items()})

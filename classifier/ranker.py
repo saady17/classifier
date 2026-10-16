@@ -266,6 +266,51 @@ def _tfidf():
         return None
 
 
+def requirement_coverage(resume_text: str, jobs: dict[str, list[str]]) -> dict[str, dict[str, float]]:
+    """Line-level matching (TF-IDF, no AI): for each requirement line of a job, its best match among
+    the resume's lines; plus whether the requirements' most distinctive terms appear in the resume."""
+    vec = _tfidf()
+    if vec is None:
+        return {}
+    import numpy as np
+
+    lines = [ln for ln in (x.strip(" -•*·●▪\t") for x in resume_text.splitlines()) if len(ln.split()) >= 3]
+    if not lines:
+        return {}
+    R = vec.transform(lines + [resume_text])
+    resume_lines, resume_all = R[:-1], R[-1]
+    resume_terms = set(resume_all.indices)
+    flat, owner = [], []
+    for jid, reqs in jobs.items():
+        for ln in reqs:
+            flat.append(ln)
+            owner.append(jid)
+    out: dict[str, dict[str, float]] = {}
+    if not flat:
+        return out
+    J = vec.transform(flat)
+    best = (J @ resume_lines.T).max(axis=1).toarray().ravel()
+    per: dict[str, list[float]] = {}
+    terms: dict[str, list[int]] = {}
+    for i, jid in enumerate(owner):
+        per.setdefault(jid, []).append(float(best[i]))
+        row = J.getrow(i)
+        if row.nnz:
+            top = row.indices[np.argsort(-row.data)[:3]]  # the line's most distinctive terms
+            terms.setdefault(jid, []).extend(int(t) for t in top)
+    for jid, sims in per.items():
+        uniq = list(dict.fromkeys(terms.get(jid, [])))
+        out[jid] = {
+            "req_lines": float(len(sims)),
+            "req_cov_mean": sum(sims) / len(sims),
+            "req_cov_min": min(sims),
+            "req_cov_share20": sum(s >= 0.20 for s in sims) / len(sims),
+            "req_cov_share35": sum(s >= 0.35 for s in sims) / len(sims),
+            "req_terms_found": (sum(t in resume_terms for t in uniq) / len(uniq)) if uniq else math.nan,
+        }
+    return out
+
+
 def content_similarity(resume_text: str, docs: dict[str, str]) -> dict[str, float]:
     """Cosine similarity of whole-text TF-IDF vectors, scaled so the closest candidate is 1."""
     vec = _tfidf()
@@ -384,6 +429,7 @@ def rank(
             part,
         ).fetchall()
     content = content_similarity(resume.text, {r["id"]: f"{r['title']}\n{r['description']}" for r in all_rows})
+    coverage = requirement_coverage(resume.text, {r["id"]: json.loads(r["data"]).get("requirement_lines") or [] for r in all_rows})
     for rows in (all_rows,):
         for row in rows:
             loc_score, allowed = _location(row, prefs)
@@ -505,6 +551,7 @@ def rank(
                 "structured": float(job["structured"]),
                 "n_resume_skills": len(resume.skills),
                 "remote": {"remote": 2.0, "hybrid": 1.0}.get(row["remote"], 0.0),
+                **coverage.get(row["id"], {}),
             }
             model = _model() if use_model else None
             if model is not None:

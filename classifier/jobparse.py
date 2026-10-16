@@ -101,6 +101,7 @@ class JobProfile:
     clearance: bool = False
     structured: bool = False  # True when requirement sections were found
     languages: list[str] = field(default_factory=list)  # spoken languages required (English not listed)
+    requirement_lines: list[str] = field(default_factory=list)  # each required/preferred line, for line-level matching
     license_states: list[str] = field(default_factory=list)  # US states whose license the job requires
     license_compact_ok: bool = False  # mentions a compact / multistate license
     license_obtainable: bool = False  # "ability to obtain", "within 90 days of hire"
@@ -199,6 +200,7 @@ def parse_job(description: str, company: str = "") -> JobProfile:
     for name in list(profile.preferred):
         if name in profile.required:
             del profile.preferred[name]
+    profile.requirement_lines = [ln.strip(" -•*·\t")[:300] for ln in req_lines + pref_lines if len(ln.split()) >= 3][:40]
     profile.min_years = _years(req_lines)
     profile.preferred_years = _years(pref_lines)
     req_text = "\n".join(req_lines)
