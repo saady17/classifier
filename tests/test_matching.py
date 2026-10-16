@@ -164,3 +164,10 @@ def test_h1b_name_matching(tmp_path, monkeypatch):
     assert sp.check("Stripe", "15-1252.00")[0] and "3 H-1B positions in this occupation" in sp.check("Stripe", "15-1252.00")[1]
     assert sp.check("Includedhealth", "29-1141.00")[0]
     assert not sp.check("Nope", None)[0] and not sp.check("Aussie Co", None)[0]
+
+
+def test_bare_years_and_languages():
+    job = parse_job("Requirements:\n- 5+ years writing production Go or Rust\n- Fluent German required\n"
+                    "About us\nFounded 10 years ago, we serve Spanish-speaking customers.")
+    assert job.min_years == 5 and job.languages == ["german"]
+    assert parse_job("Requirements:\n- Korean-English bilingual (written and spoken)").languages == ["korean"]

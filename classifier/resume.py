@@ -58,6 +58,7 @@ class ResumeProfile:
     license_states: set[str] = field(default_factory=set)  # US states it holds a professional license in
     license_compact: bool = False
     degree_subjects: set[str] = field(default_factory=set)
+    languages: set[str] = field(default_factory=set)  # spoken languages besides English
 
 
 def extract_text(data: bytes, filename: str) -> str:
@@ -226,6 +227,9 @@ def parse_resume(text: str) -> ResumeProfile:
         main = max(profile.occupations, key=profile.occupations.get) if profile.occupations else None
         current = next((r for r in profile.roles if r.occupation == main), profile.roles[0])
         profile.current_title, profile.occupation, profile.level = current.title, current.occupation, current.level
+        # Founding your own company says little about level: use years instead.
+        if re.search(r"\b(founder|co-founder|owner|ceo)\b", profile.current_title or "", re.I) and profile.years < 10:
+            profile.level = 2 if profile.years >= 2.5 else 1
         # Years say more about level than a title without a level word does.
         if profile.years < 2.5:
             profile.level = min(profile.level, 1)
@@ -276,6 +280,13 @@ def parse_resume(text: str) -> ResumeProfile:
         for name, count in m.find(line).items():
             w = weights.get(sec, 0.7) * min(count, 2)
             profile.skills[name] = profile.skills.get(name, 0.0) + w
+
+    low_text = text.lower()
+    from classifier.jobparse import LANGUAGES
+
+    for lang in LANGUAGES:
+        if re.search(rf"\b{lang}\b", low_text):
+            profile.languages.add("chinese" if lang in ("mandarin", "cantonese") else lang)
 
     # No readable title anywhere: infer the occupation from the skills (O*NET links tools to occupations).
     if not profile.occupation and profile.skills:

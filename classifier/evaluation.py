@@ -26,7 +26,9 @@ from classifier import store
 from classifier.ranker import Preferences, bm25_scores, rank
 from classifier.resume import extract_text, parse_resume
 
-RESUMES_DIR = "eval/resumes"
+RESUMES_DIR = os.environ.get("RESUMES_DIR", "eval/resumes")
+# A whole folder can be pooled into one named split (e.g. "new" for a fresh holdout batch).
+FORCE_SPLIT = os.environ.get("POOL_SPLIT")
 PRIVATE = "eval/private"
 POOLS = f"{PRIVATE}/pools.json"
 RATINGS = f"{PRIVATE}/ratings.db"
@@ -122,7 +124,7 @@ def build_pools() -> None:
                 "title": row["title"], "company": row["company"], "url": row["url"], "remote": row["remote"],
                 "location": "; ".join(loc["raw"] for loc in locs[:3]), "description": row["description"][:8000],
             }
-        pools[rid] = {"file": name, "text": text, "split": split_of(rid), "order": picked, "jobs": jobs,
+        pools[rid] = {"file": name, "text": text, "split": FORCE_SPLIT or split_of(rid), "order": picked, "jobs": jobs,
                       "field": field_of(resume.occupation), "title": resume.current_title,
                       "built": datetime.now(timezone.utc).isoformat(timespec="seconds")}
         print(f"  {name}: {pools[rid]['field']} / {resume.current_title} -> {len(picked)} jobs ({pools[rid]['split']})", flush=True)

@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS skill_stats (
 
 
 # Bump when the job reader's logic changes, so every stored job is read again.
-READER_VERSION = "5"
+READER_VERSION = "6"
 
 
 def digest(row) -> str:

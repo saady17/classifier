@@ -36,6 +36,26 @@ _YEARS = re.compile(
     r"(\d{1,2})\s*(?:\+|plus)?\s*(?:-|–|to)?\s*(\d{1,2})?\s*\+?\s*(?:years?|yrs?)\b(?:\s+of)?(?:[^.\n]{0,60}?)\b(experience|exp\b|working|in\b|as\b|of\b)",
     re.I,
 )
+_BARE_YEARS = re.compile(r"\b(\d{1,2})\s*\+?\s*(?:-|–|to)?\s*(?:\d{1,2})?\s*\+?\s*(?:years?|yrs)\b", re.I)
+_NOT_EXPERIENCE = re.compile(r"years? (old|of age|ago)|founded|since \d{4}|in business|anniversary|warranty|contract term|commitment of", re.I)
+# Spoken languages a job requires ("fluent German", "Korean-English bilingual", "Spanish speaking").
+LANGUAGES = ["spanish", "french", "german", "mandarin", "cantonese", "chinese", "japanese", "korean", "portuguese",
+             "italian", "arabic", "hindi", "urdu", "russian", "dutch", "polish", "vietnamese", "tagalog", "turkish", "hebrew"]
+_LANG = r"(" + "|".join(LANGUAGES) + r")"
+_LANG_REQ = re.compile(
+    rf"\b(fluen\w*|bilingual|native|proficien\w*|business[- ]level|conversational|speak\w*|written and (spoken|verbal))\b[^.\n]{{0,40}}?\b{_LANG}\b|"
+    rf"\b{_LANG}(?:[-/ ](?:english|and english))?\b[^.\n]{{0,25}}?\b(fluen\w*|bilingual|speak\w*|proficien\w*|required|native)\b", re.I)
+
+
+def required_languages(text: str) -> list[str]:
+    found = set()
+    for m in _LANG_REQ.finditer(text):
+        for g in m.groups():
+            if g and g.lower() in LANGUAGES:
+                found.add("chinese" if g.lower() in ("mandarin", "cantonese") else g.lower())
+    return sorted(found)
+
+
 _DEGREES = [
     (5, r"\b(ph\.?\s?d|doctorate|doctoral|doctor of|d\.?n\.?p|pharm\.?d|m\.?d\.?|j\.?d\.?|psy\.?d|ed\.?d)\b"),
     (4, r"\b(masters?|master'?s|master of|m\.?s\.?c?|m\.?a\.?|mba|m\.?eng|msn|mph|msw|m\.?ed|llm)\b"),
@@ -80,6 +100,7 @@ class JobProfile:
     sponsors: bool = False
     clearance: bool = False
     structured: bool = False  # True when requirement sections were found
+    languages: list[str] = field(default_factory=list)  # spoken languages required (English not listed)
     license_states: list[str] = field(default_factory=list)  # US states whose license the job requires
     license_compact_ok: bool = False  # mentions a compact / multistate license
     license_obtainable: bool = False  # "ability to obtain", "within 90 days of hire"
@@ -126,10 +147,11 @@ def _years(lines: list[str]) -> float | None:
     # "five years", "Three (3) years" -> digits, so one pattern handles both.
     lines = [_NUMBER_WORD.sub(lambda m: str(_NUMBER_WORDS[m.group(1).lower()]), re.sub(r"\b(\w+) \((\d+)\)", r"\2", line)) for line in lines]
     for line in lines:
-        for m in _YEARS.finditer(line):
-            low = int(m.group(1))
-            if 0 < low <= 20:
-                found.append(low)
+        hits = [int(m.group(1)) for m in _YEARS.finditer(line)]
+        # Requirement lines also say "5+ years writing production Go" with no "experience" nearby.
+        if not hits and not _NOT_EXPERIENCE.search(line):
+            hits = [int(m.group(1)) for m in _BARE_YEARS.finditer(line)]
+        found += [h for h in hits if 0 < h <= 20]
     return float(max(found)) if found else None
 
 
@@ -194,4 +216,6 @@ def parse_job(description: str, company: str = "") -> JobProfile:
     profile.degree_subjects = sorted(subjects(req_text))
     profile.related_field_ok = bool(re.search(r"\bor (a )?(related|similar|equivalent|relevant|comparable)\b|related (technical )?field", req_text, re.I))
     profile.us_persons_only = bool(_US_PERSONS.search(whole))
+    # Only requirement lines: "we serve Spanish-speaking customers" in the company blurb is not a requirement.
+    profile.languages = required_languages(req_text)
     return profile

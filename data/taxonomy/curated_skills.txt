@@ -237,6 +237,8 @@ Treasury | treasury; cash management | finance
 CPA | cpa; certified public accountant | certification
 CFA | cfa; chartered financial analyst | certification
 ACCA | acca | certification
+ACA (ICAEW) | =ACA; icaew; chartered accountant | certification
+CIMA | cima | certification
 CMA | =CMA; certified management accountant | certification
 FINRA Series 7 | series 7 | certification
 FINRA Series 63 | series 63 | certification

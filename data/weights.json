@@ -1,13 +1,12 @@
 {
-  "required_skills": 0.1046,
-  "preferred_skills": 0.0023,
-  "skill_overlap": 0.0654,
-  "title": 0.1187,
-  "seniority": 0.3442,
-  "keywords": 0.1062,
-  "content": 0.1616,
-  "degree": 0.0687,
-  "location": 0.0282,
-  "freshness": 0.0,
+  "required_skills": 0.1028,
+  "preferred_skills": 0.0016,
+  "skill_overlap": 0.0625,
+  "title": 0.1232,
+  "seniority": 0.341,
+  "keywords": 0.106,
+  "content": 0.1678,
+  "degree": 0.0654,
+  "location": 0.0297,
   "visa": 0.0
 }

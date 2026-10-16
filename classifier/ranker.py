@@ -435,6 +435,10 @@ def rank(
                 if prefs.work_authorization == "unknown":
                     notes.append("US citizens or permanent residents only (ITAR/export control)")
             score *= credential_fit(resume, job, notes)
+            missing_lang = [lang for lang in job.get("languages") or [] if lang not in resume.languages]
+            if missing_lang:
+                score *= 0.5
+                notes.append("requires fluent " + ", ".join(lang.title() for lang in missing_lang))
             # A required license or certification the resume lacks (NP, CPA, CDL...) is close to a dealbreaker.
             licenses = {n for n, sk in matcher().skills.items() if sk.category in ("license", "certification")}
             missing_licenses = [s for s in miss if s in licenses]
