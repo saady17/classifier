@@ -8,6 +8,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import date
 
+from classifier.credentials import COMPACT, license_states, subjects
 from classifier.jobparse import _DEGREES
 from classifier.locations import parse_location
 from classifier.skills import matcher
@@ -54,6 +55,9 @@ class ResumeProfile:
     location_region: str | None = None
     location_city: str | None = None
     is_student: bool = False  # still studying (expected graduation, current enrollment)
+    license_states: set[str] = field(default_factory=set)  # US states it holds a professional license in
+    license_compact: bool = False
+    degree_subjects: set[str] = field(default_factory=set)
 
 
 def extract_text(data: bytes, filename: str) -> str:
@@ -241,6 +245,12 @@ def parse_resume(text: str) -> ResumeProfile:
     this_year = date.today().year
     future = [int(y) for y in re.findall(r"\b(20\d\d)\b", edu_text) if int(y) > this_year or (int(y) == this_year and date.today().month < 6)]
     profile.is_student = bool(re.search(r"\b(expected|anticipated|pursuing|candidate for|in progress|current student)\b", edu_text, re.I) or future)
+
+    # Licenses (with their states) and degree subjects.
+    cert_text = "\n".join(line for sec, line in lines if sec in ("certifications", "header", "summary", "education", "skills"))
+    profile.license_states = license_states(cert_text or text, resume=True)
+    profile.license_compact = bool(COMPACT.search(cert_text))
+    profile.degree_subjects = subjects(edu_text or text, resume=True)
 
     # Highest degree, from the education section when there is one.
     edu = "\n".join(line for sec, line in lines if sec == "education") or text

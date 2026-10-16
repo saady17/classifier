@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from classifier.credentials import COMPACT, OBTAINABLE, license_states, subjects
 from classifier.skills import matcher
 
 REQ, PREF, DUTY, SKIP, BODY = "required", "preferred", "duties", "skip", "body"
@@ -57,6 +58,11 @@ _SPONSOR = re.compile(
     r"(open|willing) to sponsor|sponsorship available|will provide (visa )?sponsorship|offers? (visa )?sponsorship",
     re.I,
 )
+_US_PERSONS = re.compile(
+    r"\bITAR\b|\bu\.?s\.? persons?\b|(\bu\.?s\.?|\bunited states) citizens?(hip)? (is )?(required|only)|"
+    r"must be a u\.?s\.? citizen|citizens or (lawful )?permanent residents|green card holders? only|"
+    # export-control boilerplate counts only when it actually restricts the role to US persons/citizens
+    r"export (control|regulation)s?[^.]{0,200}\b(u\.?s\.? persons?|citizens?|permanent residents?)\b", re.I)
 _CLEARANCE = re.compile(r"\b(security clearance|secret clearance|ts/sci|top secret|public trust clearance|active clearance)\b", re.I)
 
 
@@ -74,6 +80,12 @@ class JobProfile:
     sponsors: bool = False
     clearance: bool = False
     structured: bool = False  # True when requirement sections were found
+    license_states: list[str] = field(default_factory=list)  # US states whose license the job requires
+    license_compact_ok: bool = False  # mentions a compact / multistate license
+    license_obtainable: bool = False  # "ability to obtain", "within 90 days of hire"
+    degree_subjects: list[str] = field(default_factory=list)  # subject families it asks for
+    related_field_ok: bool = False  # "or related field"
+    us_persons_only: bool = False  # ITAR / export control / US citizens or permanent residents
 
 
 def _heading_kind(line: str) -> str | None:
@@ -175,4 +187,11 @@ def parse_job(description: str, company: str = "") -> JobProfile:
     profile.no_sponsorship = bool(_NO_SPONSOR.search(whole))
     profile.sponsors = bool(_SPONSOR.search(whole)) and not profile.no_sponsorship
     profile.clearance = bool(_CLEARANCE.search(whole))
+    req_and_pref = req_text + "\n" + "\n".join(pref_lines)
+    profile.license_states = sorted(license_states(req_and_pref or whole))
+    profile.license_compact_ok = bool(COMPACT.search(req_and_pref))
+    profile.license_obtainable = bool(OBTAINABLE.search(req_and_pref))
+    profile.degree_subjects = sorted(subjects(req_text))
+    profile.related_field_ok = bool(re.search(r"\bor (a )?(related|similar|equivalent|relevant|comparable)\b|related (technical )?field", req_text, re.I))
+    profile.us_persons_only = bool(_US_PERSONS.search(whole))
     return profile

@@ -11,12 +11,12 @@ import os
 import re
 import sqlite3
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from functools import lru_cache
 
 from rapidfuzz import fuzz
 
-from classifier import store
+from classifier import h1b, store
+from classifier.credentials import GROUP
 from classifier.resume import ResumeProfile
 from classifier.skills import matcher
 from classifier.titles import base_title
@@ -37,14 +37,14 @@ HAND_WEIGHTS = {
     "content": 0.08,
     "degree": 0.04,
     "location": 0.05,
-    "freshness": 0.03,
     "visa": 0.02,
 }
 
 
-# The judges were told to ignore location and were not asked about posting age or visa, so ratings
-# say nothing about these; they keep their hand-set weights (they matter to job seekers).
-NOT_LEARNED = ("location", "freshness", "visa")
+# The judges were told to ignore location and were not asked about visa, so ratings say nothing
+# about these; they keep their hand-set weights. Posting age is not scored: Jobzhub applies as soon
+# as a job is fetched, so every job is fresh.
+NOT_LEARNED = ("location", "visa")
 
 
 def _load_weights() -> dict[str, float]:
@@ -68,6 +68,8 @@ class Preferences:
     city: str | None = None
     region: str | None = None
     willing_to_relocate: bool = True
+    # citizen | permanent_resident | needs_sponsorship | unknown. Never guessed from the resume.
+    work_authorization: str = "unknown"
 
 
 @dataclass
@@ -186,6 +188,32 @@ def _seniority(resume: ResumeProfile, job_level: int, min_years: float | None) -
     return 0.5 * level_score + 0.5 * years_score, notes
 
 
+def credential_fit(resume: ResumeProfile, job: dict, notes: list[str]) -> float:
+    """Multiplier for a state license the job needs and a degree subject it asks for."""
+    factor = 1.0
+    states = set(job.get("license_states") or [])
+    if states and (resume.license_states or any(s in resume.skills for s in ("Registered Nurse", "Licensed Practical Nurse", "Nurse Practitioner", "Teaching license", "Social work"))):
+        if resume.license_states & states:
+            pass
+        elif job.get("license_compact_ok") and resume.license_compact:
+            pass
+        elif job.get("license_obtainable"):
+            factor *= 0.85
+            notes.append(f"needs a {'/'.join(sorted(states))} license (can be obtained after hiring)")
+        else:
+            factor *= 0.55
+            notes.append(f"requires a {'/'.join(sorted(states))} license")
+    wanted = set(job.get("degree_subjects") or [])
+    if wanted and job.get("degree_required") and resume.degree_subjects and not (wanted & resume.degree_subjects):
+        same_group = {GROUP[w] for w in wanted} & {GROUP[h] for h in resume.degree_subjects}
+        if job.get("related_field_ok") and same_group:
+            factor *= 0.92
+        else:
+            factor *= 0.75
+            notes.append("asks for a degree in " + ", ".join(sorted(wanted)).replace("_", " "))
+    return factor
+
+
 ENTRY_JOB_LEVEL = 1
 INTERN_TITLE = re.compile(r"\b(intern|internship|co-?op|summer analyst|summer associate)\b", re.I)
 
@@ -233,18 +261,6 @@ def content_similarity(resume_text: str, docs: dict[str, str]) -> dict[str, floa
     sims = (vec.transform([docs[i] for i in ids]) @ r.T).toarray().ravel()
     top = float(sims.max()) or 1.0
     return {i: float(s) / top for i, s in zip(ids, sims)}
-
-
-def _age_days(posted_at: str | None) -> float | None:
-    if not posted_at:
-        return None
-    try:
-        dt = datetime.fromisoformat(posted_at.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return max(0.0, (datetime.now(timezone.utc) - dt).total_seconds() / 86400)
 
 
 def _location(job_row, prefs: Preferences) -> tuple[float, bool]:
@@ -359,8 +375,16 @@ def rank(
                 continue
             job = json.loads(row["data"])
             notes = []
-            if prefs.needs_sponsorship and job["no_sponsorship"]:
-                continue
+            if prefs.needs_sponsorship:
+                if job["no_sponsorship"]:
+                    continue
+                # Hard check against US Department of Labor H-1B data: no record, no match.
+                sp = h1b.sponsors()
+                if sp.loaded:
+                    ok, note = sp.check(row["company"], row["occupation"])
+                    if not ok:
+                        continue
+                    notes.append(note)
             if job["clearance"] and not prefs.has_clearance:
                 continue
             if not job.get("english", True):
@@ -375,8 +399,6 @@ def rank(
                 degree = 0.6 if (job["degree_equivalent_ok"] or not job["degree_required"]) else 0.2
                 if job["degree_required"]:
                     notes.append("asks for a degree above yours" + (" (or equivalent experience)" if job["degree_equivalent_ok"] else ""))
-            age = _age_days(row["posted_at"])
-            freshness = math.nan if age is None else (1.0 if age <= 7 else max(0.3, 1.0 - (age - 7) / 120))
             visa = math.nan
             if prefs.needs_sponsorship:
                 visa = 1.0 if job["sponsors"] else 0.6
@@ -392,7 +414,6 @@ def rank(
                 "content": content.get(row["id"], math.nan),
                 "degree": degree,
                 "location": loc_score,
-                "freshness": freshness,
                 "visa": visa,
             }
             score = _combine(factors)
@@ -407,6 +428,13 @@ def rank(
             if INTERN_TITLE.search(row["title"]) and not resume.is_student:
                 score *= 0.4
                 notes.append("internship for current students")
+            # ITAR / export-control and citizen-only jobs.
+            if job.get("us_persons_only"):
+                if prefs.needs_sponsorship or prefs.work_authorization == "needs_sponsorship":
+                    continue
+                if prefs.work_authorization == "unknown":
+                    notes.append("US citizens or permanent residents only (ITAR/export control)")
+            score *= credential_fit(resume, job, notes)
             # A required license or certification the resume lacks (NP, CPA, CDL...) is close to a dealbreaker.
             licenses = {n for n, sk in matcher().skills.items() if sk.category in ("license", "certification")}
             missing_licenses = [s for s in miss if s in licenses]

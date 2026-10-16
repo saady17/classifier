@@ -126,3 +126,41 @@ def test_side_job_does_not_decide_the_field():
     )
     r = parse_resume(text)
     assert r.current_title == "Data Analyst"
+
+
+def test_state_licenses_and_degree_subjects():
+    job = parse_job(
+        "Requirements:\n- Active NY Registered Nurse license\n- Bachelor's degree in Nursing required\n"
+        "This role is subject to ITAR; U.S. persons only."
+    )
+    assert job.license_states == ["NY"] and job.degree_subjects == ["health"] and job.us_persons_only
+    nurse = parse_resume(open("tests/fixtures/resume_nurse.txt").read())
+    assert "TX" in nurse.license_states and nurse.license_compact and "health" in nurse.degree_subjects
+
+    from classifier.ranker import credential_fit
+
+    notes: list[str] = []
+    assert credential_fit(nurse, {"license_states": ["NY"], "degree_subjects": [], "degree_required": False}, notes) < 1
+    assert credential_fit(nurse, {"license_states": ["TX"], "degree_subjects": [], "degree_required": False}, []) == 1
+
+
+def test_h1b_name_matching(tmp_path, monkeypatch):
+    import csv
+
+    from classifier import h1b, store
+
+    path = tmp_path / "lca.csv"
+    with open(path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["CASE_STATUS", "VISA_CLASS", "EMPLOYER_NAME", "SOC_CODE", "JOB_TITLE", "TOTAL_WORKER_POSITIONS", "DECISION_DATE"])
+        w.writerow(["Certified", "H-1B", "STRIPE, INC.", "15-1252.00", "Software Engineer", "3", "2025-09-01"])
+        w.writerow(["Certified", "H-1B", "INCLUDED HEALTH, INC.", "29-1141.00", "Registered Nurse", "1", "2025-05-01"])
+        w.writerow(["Denied", "H-1B", "NOPE LLC", "15-1252.00", "Engineer", "1", "2025-05-01"])
+        w.writerow(["Certified", "E-3 Australian", "AUSSIE CO", "15-1252.00", "Engineer", "1", "2025-05-01"])
+    monkeypatch.setattr(store, "DB_PATH", str(tmp_path / "jobs.db"))
+    monkeypatch.setattr(store.connect, "__defaults__", (str(tmp_path / "jobs.db"),))
+    h1b.load([str(path)])
+    sp = h1b.Sponsors(store.connect())
+    assert sp.check("Stripe", "15-1252.00")[0] and "3 H-1B positions in this occupation" in sp.check("Stripe", "15-1252.00")[1]
+    assert sp.check("Includedhealth", "29-1141.00")[0]
+    assert not sp.check("Nope", None)[0] and not sp.check("Aussie Co", None)[0]

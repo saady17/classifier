@@ -17,7 +17,7 @@ import httpx
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 
-OUT = "eval/resumes"
+OUT = os.environ.get("RESUMES_OUT", "eval/resumes")
 TYPES = {"application/pdf": ".pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx", "text/plain": ".txt"}
 
 

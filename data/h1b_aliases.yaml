@@ -1,0 +1,5 @@
+# Job-feed company name -> legal name used in DOL H-1B filings, where automatic matching fails.
+# Add entries when `python -m classifier.h1b_report` lists a large employer as unmatched.
+Meta: Meta Platforms
+Block: Block, Inc.
+Ro: Roman Health Ventures

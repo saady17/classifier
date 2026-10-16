@@ -36,6 +36,7 @@ class Prefs(BaseModel):
     needs_sponsorship: bool = False
     has_clearance: bool = False
     willing_to_relocate: bool = True
+    work_authorization: str = "unknown"  # citizen | permanent_resident | needs_sponsorship | unknown
 
 
 class TextRequest(BaseModel):
@@ -54,6 +55,7 @@ def _run(text: str, prefs: Prefs, limit: int) -> dict:
     p = Preferences(
         countries=countries, remote=prefs.remote, needs_sponsorship=prefs.needs_sponsorship,
         has_clearance=prefs.has_clearance, willing_to_relocate=prefs.willing_to_relocate,
+        work_authorization=prefs.work_authorization,
         city=resume.location_city, region=resume.location_region,
     )
     matches = rank(resume, p, limit=max(1, min(limit, 100)))
