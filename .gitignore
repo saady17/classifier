@@ -7,6 +7,9 @@ __pycache__/
 /data/raw/
 /data/taxonomy/raw/
 /eval/resumes/
+/eval/resumes*/
+/eval/**/*.pdf
+/eval/**/*.docx
 /eval/private/
 .env
 /data/*.log
