@@ -7,7 +7,8 @@ has 8 GB of RAM: give containers `-m 5g` and keep `FEATURE_WORKERS=1` (two worke
 
 ## Nightly refresh
 
-`/etc/cron.d/classifier-refresh` runs at 05:00 UTC:
+`deploy/classifier-refresh.cron` (installed as `/etc/cron.d/classifier-refresh`; **currently not
+installed**, the classifier is stopped) runs at 05:00 UTC:
 
 ```sh
 python -m classifier.ingest && python -m classifier.features
