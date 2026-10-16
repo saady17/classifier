@@ -9,10 +9,13 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 import sqlite3
 import time
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict
+
+import numpy as np
 
 from classifier import store
 from classifier.jobparse import parse_job
@@ -39,11 +42,19 @@ CREATE TABLE IF NOT EXISTS skill_stats (
 
 
 # Bump when the job reader's logic changes, so every stored job is read again.
-READER_VERSION = "2"
+READER_VERSION = "3"
 
 
 def digest(row) -> str:
     return hashlib.sha1(f"{READER_VERSION}\n{row['title']}\n{row['company']}\n{row['description']}".encode()).hexdigest()
+
+
+_ENGLISH = {"the", "and", "to", "of", "a", "in", "for", "with", "you", "we", "our", "is", "are", "will", "on", "as", "your", "be", "this", "or"}
+
+
+def english_share(text: str) -> float:
+    words = re.findall(r"[a-zà-ÿ]+", text.lower())[:600]
+    return sum(w in _ENGLISH for w in words) / len(words) if words else 0.0
 
 
 def compute(row: dict) -> tuple:
@@ -52,7 +63,9 @@ def compute(row: dict) -> tuple:
     for name in matcher().find(row["title"]):
         job.required.setdefault(name, 1)
     code, conf = title_index().occupation(row["title"])
-    return (row["id"], row["hash"], code, conf, title_level(row["title"]), json.dumps(asdict(job)))
+    data = asdict(job)
+    data["english"] = english_share(row["description"]) >= 0.12  # English posts sit around 0.2-0.3
+    return (row["id"], row["hash"], code, conf, title_level(row["title"]), json.dumps(data))
 
 
 def run() -> None:
@@ -98,5 +111,25 @@ def rebuild_skill_stats(db: sqlite3.Connection) -> None:
     print(f"skill stats: {len(df)} skills over {n} jobs")
 
 
+TFIDF_PATH = "data/tfidf.pkl"
+
+
+def build_tfidf(db: sqlite3.Connection) -> None:
+    """Classic TF-IDF over job posts (no AI): lets the ranker compare a resume's and a job's whole
+    vocabulary, including industry words the skills dictionary does not list."""
+    import pickle
+
+    from sklearn.feature_extraction.text import TfidfVectorizer
+
+    texts = [f"{t}\n{d}" for t, d in db.execute("SELECT title, description FROM jobs WHERE duplicate_of IS NULL")]
+    vec = TfidfVectorizer(stop_words="english", sublinear_tf=True, min_df=3, max_df=0.4, ngram_range=(1, 2),
+                          max_features=150_000, token_pattern=r"(?u)\b[a-zA-Z][a-zA-Z0-9+#.]{1,}\b", dtype=np.float32)
+    vec.fit(texts)
+    with open(TFIDF_PATH, "wb") as f:
+        pickle.dump(vec, f)
+    print(f"tf-idf: {len(vec.vocabulary_)} terms over {len(texts)} jobs")
+
+
 if __name__ == "__main__":
     run()
+    build_tfidf(store.connect())

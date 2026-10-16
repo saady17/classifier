@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import math
 import re
 from dataclasses import dataclass, field
 from datetime import date
@@ -265,4 +266,18 @@ def parse_resume(text: str) -> ResumeProfile:
         for name, count in m.find(line).items():
             w = weights.get(sec, 0.7) * min(count, 2)
             profile.skills[name] = profile.skills.get(name, 0.0) + w
+
+    # No readable title anywhere: infer the occupation from the skills (O*NET links tools to occupations).
+    if not profile.occupation and profile.skills:
+        votes: dict[str, float] = {}
+        for name, w in profile.skills.items():
+            occs = m.skills[name].occupations if name in m.skills else ()
+            for code in occs[:40]:
+                votes[code] = votes.get(code, 0.0) + min(w, 3) / math.sqrt(len(occs))
+        if votes:
+            best = sorted(votes.items(), key=lambda kv: -kv[1])[:3]
+            total = sum(v for _, v in best)
+            profile.occupations = {code: v / total for code, v in best}
+            profile.occupation = best[0][0]
+            profile.level = 1 if profile.years < 2.5 else 2
     return profile

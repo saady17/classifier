@@ -12,6 +12,7 @@ import re
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from functools import lru_cache
 
 from rapidfuzz import fuzz
 
@@ -27,12 +28,13 @@ SOFT_WEIGHT = 0.25  # communication, leadership... matter, but say little about 
 CATEGORY_WEIGHT = {"soft": SOFT_WEIGHT, "spoken_language": 0.6}
 
 HAND_WEIGHTS = {
-    "required_skills": 0.30,
-    "preferred_skills": 0.06,
-    "skill_overlap": 0.10,
+    "required_skills": 0.28,
+    "preferred_skills": 0.05,
+    "skill_overlap": 0.09,
     "title": 0.24,
     "seniority": 0.10,
-    "keywords": 0.06,
+    "keywords": 0.03,
+    "content": 0.08,
     "degree": 0.04,
     "location": 0.05,
     "freshness": 0.03,
@@ -205,6 +207,29 @@ def level_fit(resume: ResumeProfile, job_level: int, min_years: float | None) ->
     return factor
 
 
+@lru_cache(maxsize=1)
+def _tfidf():
+    import pickle
+
+    try:
+        with open(os.environ.get("CLASSIFIER_TFIDF", "data/tfidf.pkl"), "rb") as f:
+            return pickle.load(f)
+    except OSError:
+        return None
+
+
+def content_similarity(resume_text: str, docs: dict[str, str]) -> dict[str, float]:
+    """Cosine similarity of whole-text TF-IDF vectors, scaled so the closest candidate is 1."""
+    vec = _tfidf()
+    if vec is None or not docs:
+        return {}
+    ids = list(docs)
+    r = vec.transform([resume_text])
+    sims = (vec.transform([docs[i] for i in ids]) @ r.T).toarray().ravel()
+    top = float(sims.max()) or 1.0
+    return {i: float(s) / top for i, s in zip(ids, sims)}
+
+
 def _age_days(posted_at: str | None) -> float | None:
     if not posted_at:
         return None
@@ -313,13 +338,16 @@ def rank(
     # 2. Score every candidate.
     ids = list(candidates)
     results: list[Match] = []
+    all_rows = []
     for chunk in range(0, len(ids), 900):
         part = ids[chunk : chunk + 900]
         marks = ",".join("?" * len(part))
-        rows = db.execute(
+        all_rows += db.execute(
             f"SELECT j.*, f.occupation, f.level AS job_level, f.data FROM jobs j JOIN job_features f ON f.id = j.id WHERE j.id IN ({marks})",
             part,
         ).fetchall()
+    content = content_similarity(resume.text, {r["id"]: f"{r['title']}\n{r['description']}" for r in all_rows})
+    for rows in (all_rows,):
         for row in rows:
             loc_score, allowed = _location(row, prefs)
             if not allowed:
@@ -330,6 +358,8 @@ def rank(
                 continue
             if job["clearance"] and not prefs.has_clearance:
                 continue
+            if not job.get("english", True):
+                continue  # Jobzhub's markets are English-speaking; a German-language post is not a match
             req, hit, miss = _coverage(job["required"], resume, weights)
             pref, phit, _ = _coverage(job["preferred"], resume, weights)
             all_skills = set(job["required"]) | set(job["preferred"]) | set(job["duties"])
@@ -354,6 +384,7 @@ def rank(
                 "title": _title_fit(resume, row["title"], row["occupation"]),
                 "seniority": seniority,
                 "keywords": candidates[row["id"]] / top_bm25 if top_bm25 else 0.0,
+                "content": content.get(row["id"], math.nan),
                 "degree": degree,
                 "location": loc_score,
                 "freshness": freshness,
